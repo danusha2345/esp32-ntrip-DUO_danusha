@@ -15,6 +15,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container: espressif/idf:v5.3
     strategy:
       matrix:
         target: [esp32, esp32c3, esp32s3, esp32c6]
@@ -38,21 +39,12 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Setup ESP-IDF
-      uses: espressif/esp-idf-ci-action@v1
-      with:
-        esp_idf_version: v5.3
-
-    - name: Clean and set target configuration
+    - name: Configure and build firmware
       run: |
-        # Full clean to avoid any conflicts
-        rm -rf build/ sdkconfig sdkconfig.old
+        . /opt/esp/idf/export.sh
         
-        # Set environment variable for target
-        export IDF_TARGET=${{ matrix.target }}
-        echo "IDF_TARGET=${{ matrix.target }}" >> $GITHUB_ENV
-        
-        # Set target with force regeneration
+        # Set target
+        echo "Setting target to ${{ matrix.target }}"
         idf.py set-target ${{ matrix.target }}
         
         # Copy target-specific sdkconfig if exists
@@ -61,15 +53,7 @@ jobs:
           cp "sdkconfig.${{ matrix.target }}" sdkconfig
         fi
         
-        # Show current configuration status
-        echo "=== Configuration Status ==="
-        echo "IDF_TARGET: $IDF_TARGET"
-        if [ -f "sdkconfig" ]; then
-          echo "Active sdkconfig target: $(grep '^CONFIG_IDF_TARGET=' sdkconfig || echo 'not found')"
-        fi
-        
-    - name: Build firmware
-      run: |
+        # Build
         idf.py build
         
     - name: Create firmware package

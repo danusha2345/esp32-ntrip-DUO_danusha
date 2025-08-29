@@ -321,13 +321,14 @@ static esp_err_t file_check_etag_hash(httpd_req_t *req, char *file_hash_path, ch
         httpd_req_get_hdr_value_str(req, "If-None-Match", if_none_match, if_none_match_length);
 
         bool header_match = strcmp(etag, if_none_match) == 0;
-        free(if_none_match);
 
         // Matching ETag, return not modified
         if (header_match) {
+            free(if_none_match);
             return ESP_OK;
         } else {
             ESP_LOGW(TAG, "ETag for file %s sent by client does not match (%s != %s)", file_hash_path, etag, if_none_match);
+            free(if_none_match);
             return ESP_ERR_INVALID_CRC;
         }
     }
