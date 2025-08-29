@@ -100,6 +100,24 @@ build_target() {
             cp build/www.bin "$BUILD_DIR/$target/"
         fi
         
+        # Generate merged firmware (single file)
+        echo -e "${BLUE}Generating merged firmware...${NC}"
+        if idf.py merge-bin --format hex; then
+            MERGED_HEX=$(find build/ -name "*-merged.hex" | head -1)
+            if [ -n "$MERGED_HEX" ]; then
+                cp "$MERGED_HEX" "$BUILD_DIR/$target/"
+                echo -e "${GREEN}  Copied merged hex: $(basename $MERGED_HEX)${NC}"
+            fi
+        fi
+        
+        if idf.py merge-bin --format bin; then
+            MERGED_BIN=$(find build/ -name "*-merged.bin" | head -1)
+            if [ -n "$MERGED_BIN" ]; then
+                cp "$MERGED_BIN" "$BUILD_DIR/$target/"
+                echo -e "${GREEN}  Copied merged bin: $(basename $MERGED_BIN)${NC}"
+            fi
+        fi
+        
         # Generate flash script
         cat > "$BUILD_DIR/$target/flash.sh" << EOF
 #!/bin/bash

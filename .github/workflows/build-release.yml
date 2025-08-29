@@ -43,6 +43,15 @@ jobs:
       run: |
         . /opt/esp/idf/export.sh
         
+        # Fix ESP32-C6 esp_coex adapter bug in ESP-IDF 5.5
+        if [ "${{ matrix.target }}" = "esp32c6" ]; then
+          echo "Fixing ESP32-C6 esp_coex adapter include path..."
+          if [ -f "/opt/esp/idf/components/esp_coex/esp32c6/esp_coex_adapter.c" ]; then
+            sed -i 's/#include "esp32c3\/rom\/ets_sys.h"/#include "esp32c6\/rom\/ets_sys.h"/g' /opt/esp/idf/components/esp_coex/esp32c6/esp_coex_adapter.c
+            echo "ESP32-C6 esp_coex fix applied"
+          fi
+        fi
+        
         # Clean any existing build directory
         if [ -d "build/" ]; then
           echo "Cleaning existing build directory..."
@@ -67,8 +76,12 @@ jobs:
           cp "sdkconfig.${{ matrix.target }}" sdkconfig
         fi
         
-        # Build
+        # Build and generate merged firmware
         idf.py build
+        
+        # Generate merged firmware (single file containing all partitions)
+        echo "Generating merged firmware..."
+        idf.py merge-bin --format raw
         
     - name: Create firmware package
       run: |
@@ -77,6 +90,12 @@ jobs:
         cp build/partition_table/partition-table.bin release/${{ matrix.target }}/
         cp build/*.bin release/${{ matrix.target }}/
         cp build/*.elf release/${{ matrix.target }}/
+        
+        # Copy merged firmware
+        if [ -f "build/merged-binary.bin" ]; then
+          echo "Copying merged firmware..."
+          cp build/merged-binary.bin release/${{ matrix.target }}/${{ matrix.target }}-ntrip-duo-merged.bin
+        fi
         
         # Создаем flash_download_tool конфигурацию
         cat > release/${{ matrix.target }}/download.conf << 'EOF'
@@ -102,6 +121,7 @@ jobs:
         - `${{ matrix.target }}-ntrip-duo.bin` - Main application firmware
         - `www.bin` - Web interface files
         - `${{ matrix.target }}-ntrip-duo.elf` - ELF file for debugging
+        - `${{ matrix.target }}-ntrip-duo-merged.bin` - Complete firmware (all-in-one file)
         - `download.conf` - Flash configuration for ESP32 Flash Download Tool
         
         ## Flash Instructions
@@ -112,11 +132,18 @@ jobs:
         3. Set flash parameters: DIO mode, ${{ matrix.flash_size }}, 40MHz
         4. Connect your ${{ matrix.board_name }} and flash
         
-        ### Using esptool.py
+        ### Using esptool.py (Individual Files)
         ```bash
         pip install esptool
         
         python -m esptool --chip ${{ matrix.target }} -p COM_PORT -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size ${{ matrix.flash_size }} --flash_freq 40m 0x1000 bootloader.bin 0x8000 partition-table.bin 0x10000 ${{ matrix.target }}-ntrip-duo.bin 0x210000 www.bin
+        ```
+        
+        ### Using esptool.py (Merged Firmware - Recommended)
+        ```bash
+        pip install esptool
+        
+        python -m esptool --chip ${{ matrix.target }} -p COM_PORT -b 460800 --before default_reset --after hard_reset write_flash 0x0 ${{ matrix.target }}-ntrip-duo-merged.bin
         ```
         
         ### Using ESP-IDF
@@ -265,17 +292,18 @@ jobs:
         This release contains pre-compiled firmware for multiple ESP32 variants:
         
         ## Available Targets
-        - **ESP32** - Original ESP32 chip (esp32-ntrip-duo-esp32-*.tar.gz)
-        - **ESP32-C3** - ESP32-C3 with RISC-V core (esp32-ntrip-duo-esp32c3-*.tar.gz)
-        - **ESP32-S3** - ESP32-S3 with enhanced features (esp32-ntrip-duo-esp32s3-*.tar.gz)
-        - **ESP32-C6** - ESP32-C6 with WiFi 6 support (esp32-ntrip-duo-esp32c6-*.tar.gz)
+        - **ESP32** - Original ESP32 chip with merged firmware (esp32-ntrip-duo-esp32-*.tar.gz)
+        - **ESP32-C3** - ESP32-C3 with RISC-V core and merged firmware (esp32-ntrip-duo-esp32c3-*.tar.gz)
+        - **ESP32-S3** - ESP32-S3 with enhanced features and merged firmware (esp32-ntrip-duo-esp32s3-*.tar.gz)
+        - **ESP32-C6** - ESP32-C6 with WiFi 6 support and merged firmware (esp32-ntrip-duo-esp32c6-*.tar.gz)
         
         ## What's New
-        - ✅ Serial Commands for remote GNSS configuration
-        - ✅ SD Card Logging with daily RTCM data rotation
-        - ✅ Extended ESP32-S3 and ESP32-C6 support
-        - ✅ ESP-IDF 6.0 compatibility
-        - ✅ Enhanced web interface
+        - ✅ **Merged Firmware**: Single-file firmware for easy flashing
+        - ✅ **TCP/UDP Socket Server/Client**: Network socket functionality
+        - ✅ **Serial Commands**: Remote GNSS configuration via web interface
+        - ✅ **SD Card Logging**: Automatic RTCM data logging with daily file rotation
+        - ✅ **Extended ESP32-S3 and ESP32-C6 support**: Fixed ESP-IDF 5.5 compatibility
+        - ✅ **Enhanced web interface**: Improved Socket and Serial Commands modules
         
         ## Quick Start
         1. Download the appropriate .tar.gz file for your ESP32 variant
@@ -321,10 +349,11 @@ jobs:
           - 🔧 **Multi-chip Support**: Native support for ESP32, ESP32-C3, ESP32-S3, and ESP32-C6
           
           ### 🔧 Improvements  
-          - Updated for ESP-IDF 6.0 compatibility
-          - Enhanced web interface with new controls
-          - Conditional GPIO pin mappings for different chips
-          - Fixed deprecated function calls and task signatures
+          - **Merged Firmware Generation**: Single-file firmware for simplified flashing
+          - **ESP32-C6 Compilation Fix**: Resolved ESP-IDF 5.5 compatibility issue
+          - **Enhanced web interface**: Socket Server/Client and Serial Commands modules
+          - **Conditional GPIO pin mappings** for different chips
+          - **Fixed deprecated function calls** and task signatures
           
           ### 📦 Downloads
           Choose the appropriate firmware for your hardware:
@@ -340,13 +369,19 @@ jobs:
           - Hardware pin mapping documentation
           - Setup and configuration guides
           
-          ### 🚀 Quick Flash (using esptool)
+          ### 🚀 Quick Flash (using merged firmware - recommended)
           ```bash
           # Extract archive and navigate to folder
           tar -xzf esp32-ntrip-duo-esp32-*.tar.gz
           cd esp32/
           
-          # Flash firmware (replace COM_PORT with your port)
+          # Flash merged firmware (single file, replace COM_PORT with your port)
+          python -m esptool --chip esp32 -p COM_PORT -b 460800 --before default_reset --after hard_reset write_flash 0x0 esp32-ntrip-duo-merged.bin
+          ```
+          
+          ### 🛠 Alternative Flash (individual files)
+          ```bash
+          # Flash individual files if needed
           python -m esptool --chip esp32 -p COM_PORT -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size 4MB --flash_freq 40m 0x1000 bootloader.bin 0x8000 partition-table.bin 0x10000 esp32-ntrip-duo.bin 0x210000 www.bin
           ```
           
