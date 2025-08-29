@@ -1,0 +1,83 @@
+name: Build Test
+
+on:
+  push:
+    branches: [ master, main, develop ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [esp32, esp32c3, esp32s3, esp32c6]
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Setup ESP-IDF
+      uses: espressif/esp-idf-ci-action@v1
+      with:
+        esp_idf_version: v5.2
+        target: ${{ matrix.target }}
+
+    - name: Set target configuration
+      run: |
+        idf.py set-target ${{ matrix.target }}
+        
+    - name: Build firmware
+      run: |
+        idf.py build
+        
+    - name: Check binary size
+      run: |
+        echo "=== Build Summary for ${{ matrix.target }} ==="
+        ls -lh build/*.bin build/*.elf || true
+        
+        # Проверяем размер прошивки
+        APP_SIZE=$(stat -f%z build/esp32-xbee.bin 2>/dev/null || stat -c%s build/esp32-xbee.bin)
+        echo "Application size: $(($APP_SIZE / 1024)) KB"
+        
+        # Предупреждение если размер больше 1.5MB
+        if [ $APP_SIZE -gt 1572864 ]; then
+          echo "⚠️ Warning: Application size is larger than 1.5MB"
+        fi
+        
+    - name: Upload build artifacts (on failure)
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs-${{ matrix.target }}-${{ github.run_number }}
+        path: |
+          build/log/
+          build/*.txt
+        retention-days: 7
+
+  build-status:
+    runs-on: ubuntu-latest
+    needs: build-test
+    if: always()
+    
+    steps:
+    - name: Check build results
+      run: |
+        if [[ "${{ needs.build-test.result }}" == "success" ]]; then
+          echo "✅ All builds passed successfully!"
+          echo "RESULT=success" >> $GITHUB_ENV
+        else
+          echo "❌ Some builds failed!"
+          echo "RESULT=failure" >> $GITHUB_ENV
+          exit 1
+        fi
+        
+    - name: Report status
+      if: always()
+      run: |
+        echo "Build status: ${{ env.RESULT }}"
+        echo "Commit: ${{ github.sha }}"
+        echo "Branch: ${{ github.ref_name }}"

@@ -1,0 +1,404 @@
+name: Update Documentation
+
+on:
+  push:
+    branches: [ master, main ]
+    paths:
+      - 'main/**'
+      - 'components/**'
+      - 'www/**'
+      - 'README.md'
+  workflow_dispatch:
+
+jobs:
+  update-docs:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+        
+    - name: Install dependencies
+      run: |
+        pip install PyYAML
+        
+    - name: Generate pin mapping documentation
+      run: |
+        cat > docs/PIN_MAPPING.md << 'EOF'
+        # GPIO Pin Mapping for Different ESP32 Variants
+        
+        This document describes the GPIO pin assignments for different ESP32 chip variants supported by ESP32 NTRIP DUO.
+        
+        ## ESP32 (Original)
+        
+        ### Status LEDs
+        - **Red LED**: GPIO 21
+        - **Green LED**: GPIO 22  
+        - **Blue LED**: GPIO 23
+        - **RSSI LED**: GPIO 18
+        - **Sleep LED**: GPIO 27
+        - **Association LED**: GPIO 25
+        
+        ### UART Interface (Default)
+        - **TX**: GPIO 1
+        - **RX**: GPIO 3
+        - **RTS**: GPIO 14 (optional)
+        - **CTS**: GPIO 33 (optional)
+        
+        ### Control
+        - **Reset Button**: GPIO 0
+        
+        ---
+        
+        ## ESP32-C3
+        
+        ### Status LEDs
+        - **Red LED**: GPIO 8
+        - **Green LED**: GPIO 9
+        - **Blue LED**: GPIO 10
+        - **RSSI LED**: GPIO 2
+        - **Sleep LED**: GPIO 3
+        - **Association LED**: GPIO 4
+        
+        ### UART Interface (Default)
+        - **TX**: GPIO 21
+        - **RX**: GPIO 20
+        - **RTS**: GPIO 5 (optional)
+        - **CTS**: GPIO 6 (optional)
+        
+        ### Control
+        - **Reset Button**: GPIO 0
+        
+        ---
+        
+        ## ESP32-S3
+        
+        ### Status LEDs
+        - **Red LED**: GPIO 4
+        - **Green LED**: GPIO 5
+        - **Blue LED**: GPIO 6
+        - **RSSI LED**: GPIO 18
+        - **Sleep LED**: GPIO 21
+        - **Association LED**: GPIO 47
+        
+        ### UART Interface (Default)
+        - **TX**: GPIO 43
+        - **RX**: GPIO 44
+        - **RTS**: GPIO 16 (optional)
+        - **CTS**: GPIO 15 (optional)
+        
+        ### Control
+        - **Reset Button**: GPIO 0
+        
+        ---
+        
+        ## ESP32-C6
+        
+        ### Status LEDs
+        - **Red LED**: GPIO 4
+        - **Green LED**: GPIO 5
+        - **Blue LED**: GPIO 6
+        - **RSSI LED**: GPIO 18
+        - **Sleep LED**: GPIO 19
+        - **Association LED**: GPIO 20
+        
+        ### UART Interface (Default)
+        - **TX**: GPIO 16
+        - **RX**: GPIO 17
+        - **RTS**: GPIO 4 (optional)
+        - **CTS**: GPIO 5 (optional)
+        
+        ### Control
+        - **Reset Button**: GPIO 9
+        
+        ---
+        
+        ## Notes
+        
+        1. **LED Polarity**: All LEDs are configured as active-low (common anode)
+        2. **UART Configuration**: Can be changed via web interface
+        3. **Flow Control**: RTS/CTS pins are optional and can be disabled
+        4. **Power Requirements**: 3.3V logic levels for all GPIO
+        5. **Current Limits**: LEDs should be connected through appropriate current-limiting resistors (typically 220-330Ω)
+        
+        ## Schematic Recommendations
+        
+        ### LED Connection Example
+        ```
+        ESP32_GPIO ----[220Ω]----[LED]----GND
+        ```
+        
+        ### UART Connection to GNSS
+        ```
+        ESP32_TX  -----> GNSS_RX
+        ESP32_RX  <----- GNSS_TX  
+        ESP32_RTS -----> GNSS_CTS (optional)
+        ESP32_CTS <----- GNSS_RTS (optional)
+        GND       <----> GND
+        ```
+        EOF
+        
+    - name: Generate feature documentation
+      run: |
+        cat > docs/FEATURES.md << 'EOF'
+        # ESP32 NTRIP DUO - Features Documentation
+        
+        ## Core Features
+        
+        ### 🌐 NTRIP Protocol Support
+        - **Dual NTRIP Server**: Simultaneous connection to two different NTRIP casters
+        - **NTRIP Client**: Receive correction data from NTRIP servers
+        - **Protocol Compliance**: Full NTRIP 2.0 specification support
+        - **Automatic Reconnection**: Robust connection management with retry logic
+        
+        ### 📡 GNSS Integration  
+        - **Serial Commands**: Remote configuration of GNSS receivers via web interface
+        - **UART Interface**: Configurable baud rates, parity, and flow control
+        - **Data Forwarding**: Transparent data bridge between GNSS and network
+        - **Status Monitoring**: Real-time connection and data flow indicators
+        
+        ### 💾 Data Logging
+        - **SD Card Support**: Automatic logging of RTCM correction data
+        - **Daily Rotation**: New log files created daily (YYYYMMDD.rtcm format)
+        - **Web Control**: Enable/disable logging via web interface
+        - **Storage Management**: Configurable storage paths and file management
+        
+        ### 🌐 Network Connectivity
+        - **WiFi Station**: Connect to existing WiFi networks
+        - **WiFi Access Point**: Create hotspot for configuration (ESP32_NTRIP)
+        - **Dual Mode**: Simultaneous AP and STA operation
+        - **Static IP**: Support for static IP configuration
+        
+        ### 🎛️ Web Interface
+        - **Configuration Panel**: Complete device setup via web browser
+        - **Real-time Status**: Live connection status and data statistics
+        - **Serial Terminal**: Send commands directly to GNSS receiver
+        - **Network Scanner**: WiFi network discovery and connection
+        - **Firmware Updates**: Over-the-air (OTA) update capability
+        
+        ### 💡 Status Indication
+        - **RGB LED**: Multi-color status indication
+        - **Individual LEDs**: RSSI strength, sleep mode, association status  
+        - **Configurable Colors**: Custom color schemes for different states
+        - **Brightness Control**: PWM-based intensity control
+        
+        ## Advanced Features
+        
+        ### 🔧 Configuration Management
+        - **Non-volatile Storage**: Settings preserved across reboots
+        - **Configuration Export**: Backup and restore device settings
+        - **Factory Reset**: Return to default configuration
+        - **Parameter Validation**: Input validation and error handling
+        
+        ### 🛡️ Security & Authentication
+        - **Web Authentication**: Configurable username/password protection
+        - **NTRIP Authentication**: Support for caster authentication
+        - **Secure Connections**: HTTPS and encrypted communications
+        - **Access Control**: IP-based access restrictions
+        
+        ### 📊 Monitoring & Diagnostics
+        - **Stream Statistics**: Data throughput and connection metrics
+        - **Error Reporting**: Detailed error logs and status codes
+        - **Core Dump**: Crash dump analysis for debugging
+        - **Memory Monitor**: Heap usage and memory leak detection
+        - **Task Monitor**: FreeRTOS task status and CPU utilization
+        
+        ### 🔄 Multi-target Support
+        - **ESP32**: Original ESP32 with proven stability
+        - **ESP32-S3**: Enhanced performance with additional GPIO
+        - **ESP32-C6**: Latest generation with WiFi 6 support
+        - **Conditional Compilation**: Target-specific optimizations
+        
+        ## Use Cases
+        
+        ### 📍 RTK Base Station
+        - Receive GNSS data from rover
+        - Forward corrections to NTRIP caster
+        - Log raw data for post-processing
+        - Status monitoring and remote control
+        
+        ### 📱 RTK Rover Support  
+        - Connect to NTRIP servers for corrections
+        - Forward corrections to GNSS receiver
+        - Real-time position accuracy improvement
+        - Mobile hotspot for field operations
+        
+        ### 🗂️ Data Collection
+        - Long-term GNSS data logging
+        - Automated file management
+        - Remote monitoring and control
+        - Integration with survey workflows
+        
+        ### 🔧 GNSS Configuration
+        - Remote receiver setup and testing
+        - Configuration backup and restore
+        - Multi-receiver management
+        - Firmware update coordination
+        
+        ## Technical Specifications
+        
+        ### Performance
+        - **Data Throughput**: Up to 100 Hz GNSS data rates
+        - **Concurrent Connections**: Multiple NTRIP sessions
+        - **Memory Usage**: Optimized for embedded constraints
+        - **Power Consumption**: Low-power modes supported
+        
+        ### Compatibility
+        - **GNSS Receivers**: Universal UART interface
+        - **NTRIP Casters**: Standard NTRIP 2.0 protocol
+        - **Browsers**: Modern web browser compatibility
+        - **Mobile Devices**: Responsive web interface
+        
+        ### Limitations
+        - **WiFi Range**: Standard 802.11 limitations
+        - **SD Card**: FAT32 file system requirement  
+        - **Concurrent Users**: Limited by available memory
+        - **HTTPS**: May require additional memory allocation
+        EOF
+        
+    - name: Update main README
+      run: |
+        python - << 'EOF'
+        import re
+        
+        # Читаем текущий README
+        try:
+            with open('README.md', 'r') as f:
+                content = f.read()
+        except FileNotFoundError:
+            content = "# ESP32 NTRIP DUO\n\nDual NTRIP server for ESP32 with enhanced features.\n"
+        
+        # Добавляем badges если их нет
+        badge_section = """
+        [![Build Test](https://github.com/danusha2345/esp32-ntrip-DUO_danusha/actions/workflows/build-test.yml/badge.svg)](https://github.com/danusha2345/esp32-ntrip-DUO_danusha/actions/workflows/build-test.yml)
+        [![Build and Release](https://github.com/danusha2345/esp32-ntrip-DUO_danusha/actions/workflows/build-release.yml/badge.svg)](https://github.com/danusha2345/esp32-ntrip-DUO_danusha/actions/workflows/build-release.yml)
+        [![GitHub release](https://img.shields.io/github/v/release/danusha2345/esp32-ntrip-DUO_danusha)](https://github.com/danusha2345/esp32-ntrip-DUO_danusha/releases)
+        [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+        """
+        
+        # Проверяем есть ли уже badges
+        if 'Build Test' not in content:
+            # Вставляем badges после заголовка
+            lines = content.split('\n')
+            if lines and lines[0].startswith('#'):
+                lines.insert(1, badge_section)
+                content = '\n'.join(lines)
+        
+        # Добавляем секцию быстрого старта если её нет
+        if '## Quick Start' not in content:
+            quick_start = """
+        ## Quick Start
+        
+        ### 📥 Download Pre-built Firmware
+        1. Go to [Releases](https://github.com/danusha2345/esp32-ntrip-DUO_danusha/releases)
+        2. Download the appropriate firmware for your ESP32 variant:
+           - `esp32-ntrip-duo-esp32-*.tar.gz` for ESP32
+           - `esp32-ntrip-duo-esp32s3-*.tar.gz` for ESP32-S3  
+           - `esp32-ntrip-duo-esp32c6-*.tar.gz` for ESP32-C6
+        3. Extract and follow the included README for flashing instructions
+        
+        ### 🔧 Build from Source
+        ```bash
+        git clone https://github.com/danusha2345/esp32-ntrip-DUO_danusha.git
+        cd esp32-ntrip-DUO_danusha
+        git submodule update --init --recursive
+        
+        # Setup ESP-IDF (if not already done)
+        . $HOME/esp/esp-idf/export.sh
+        
+        # Build for your target
+        idf.py set-target esp32     # or esp32s3, esp32c6
+        idf.py build
+        idf.py flash
+        ```
+        
+        ### 🌐 First Time Configuration
+        1. Connect to **ESP32_NTRIP** WiFi network (password: `12345678`)
+        2. Open browser and navigate to http://192.168.4.1
+        3. Configure your WiFi network and NTRIP settings
+        4. Connect your GNSS receiver to the configured UART pins
+        """
+            content += quick_start
+        
+        # Добавляем секцию features если её нет
+        if '## Features' not in content:
+            features = """
+        ## ✨ Features
+        
+        - 🎯 **Dual NTRIP Server**: Connect to two different NTRIP casters simultaneously
+        - 📡 **NTRIP Client**: Receive correction data for rover applications  
+        - 🎛️ **Serial Commands**: Remote GNSS configuration via web interface
+        - 💾 **SD Card Logging**: Automatic RTCM data logging with daily rotation
+        - 🌐 **Web Interface**: Complete configuration and monitoring via browser
+        - 💡 **Status LEDs**: Visual indication of connection status and data flow
+        - 🔧 **Multi-chip Support**: ESP32, ESP32-S3, and ESP32-C6 compatibility
+        - 🛡️ **Secure**: Web authentication and encrypted connections
+        - 📊 **Monitoring**: Real-time statistics and diagnostic information
+        - 🔄 **OTA Updates**: Over-the-air firmware updates
+        
+        See [FEATURES.md](docs/FEATURES.md) for detailed feature documentation.
+        """
+            content += features
+            
+        # Добавляем секцию hardware если её нет  
+        if '## Hardware' not in content:
+            hardware = """
+        ## 🔌 Hardware Setup
+        
+        ### Supported Boards
+        - **ESP32**: Original ESP32 development boards
+        - **ESP32-C3**: ESP32-C3 with RISC-V core and USB JTAG
+        - **ESP32-S3**: ESP32-S3 based boards with enhanced GPIO
+        - **ESP32-C6**: Latest ESP32-C6 with WiFi 6 support
+        
+        ### Pin Connections
+        See [PIN_MAPPING.md](docs/PIN_MAPPING.md) for detailed GPIO assignments.
+        
+        **Basic Connection:**
+        - Connect GNSS TX to ESP32 RX pin
+        - Connect GNSS RX to ESP32 TX pin  
+        - Connect GND to GND
+        - Optional: Status LEDs on configured GPIO pins
+        - Optional: SD card for data logging
+        """
+            content += hardware
+            
+        # Сохраняем обновленный README
+        with open('README.md', 'w') as f:
+            f.write(content)
+        EOF
+        
+    - name: Create docs directory
+      run: |
+        mkdir -p docs
+        
+    - name: Check if documentation changed
+      id: docs_changed
+      run: |
+        git add docs/ README.md
+        if git diff --cached --quiet; then
+          echo "changed=false" >> $GITHUB_OUTPUT
+        else
+          echo "changed=true" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Commit documentation updates
+      if: steps.docs_changed.outputs.changed == 'true'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git commit -m "📚 Auto-update documentation
+        
+        - Update pin mapping documentation
+        - Update feature documentation  
+        - Add badges and quick start to README
+        
+        🤖 Generated with [Claude Code](https://claude.ai/code)"
+        git push

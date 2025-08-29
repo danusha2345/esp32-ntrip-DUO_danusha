@@ -1,0 +1,353 @@
+name: Build and Release ESP32 Firmware
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create release'
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [esp32, esp32c3, esp32s3, esp32c6]
+        include:
+          - target: esp32
+            board_name: "ESP32"
+            flash_size: "4MB"
+          - target: esp32c3
+            board_name: "ESP32-C3"
+            flash_size: "4MB"
+          - target: esp32s3
+            board_name: "ESP32-S3"
+            flash_size: "8MB"
+          - target: esp32c6
+            board_name: "ESP32-C6"
+            flash_size: "4MB"
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Setup ESP-IDF
+      uses: espressif/esp-idf-ci-action@v1
+      with:
+        esp_idf_version: v5.2
+        target: ${{ matrix.target }}
+
+    - name: Set target configuration
+      run: |
+        idf.py set-target ${{ matrix.target }}
+        
+    - name: Configure project
+      run: |
+        idf.py menuconfig || true
+        
+    - name: Build firmware
+      run: |
+        idf.py build
+        
+    - name: Create firmware package
+      run: |
+        mkdir -p release/${{ matrix.target }}
+        cp build/bootloader/bootloader.bin release/${{ matrix.target }}/
+        cp build/partition_table/partition-table.bin release/${{ matrix.target }}/
+        cp build/*.bin release/${{ matrix.target }}/
+        cp build/*.elf release/${{ matrix.target }}/
+        
+        # Создаем flash_download_tool конфигурацию
+        cat > release/${{ matrix.target }}/download.conf << 'EOF'
+        # ESP32 NTRIP DUO Flash Configuration for ${{ matrix.board_name }}
+        # Use with ESP32 Flash Download Tool or esptool.py
+        
+        # Flash command:
+        # python -m esptool --chip ${{ matrix.target }} -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size ${{ matrix.flash_size }} --flash_freq 40m 0x1000 bootloader.bin 0x8000 partition-table.bin 0x10000 esp32-xbee.bin 0x210000 www.bin
+        
+        0x1000=bootloader.bin
+        0x8000=partition-table.bin
+        0x10000=esp32-xbee.bin
+        0x210000=www.bin
+        EOF
+        
+        # Создаем README с инструкциями
+        cat > release/${{ matrix.target }}/README.md << 'EOF'
+        # ESP32 NTRIP DUO - ${{ matrix.board_name }} Firmware
+        
+        ## Files Description
+        - `bootloader.bin` - ESP32 bootloader
+        - `partition-table.bin` - Partition table
+        - `esp32-xbee.bin` - Main application firmware
+        - `www.bin` - Web interface files
+        - `esp32-xbee.elf` - ELF file for debugging
+        - `download.conf` - Flash configuration for ESP32 Flash Download Tool
+        
+        ## Flash Instructions
+        
+        ### Using ESP32 Flash Download Tool
+        1. Download and install [ESP32 Flash Download Tool](https://www.espressif.com/en/support/download/other-tools)
+        2. Load the `download.conf` configuration
+        3. Set flash parameters: DIO mode, ${{ matrix.flash_size }}, 40MHz
+        4. Connect your ${{ matrix.board_name }} and flash
+        
+        ### Using esptool.py
+        ```bash
+        pip install esptool
+        
+        python -m esptool --chip ${{ matrix.target }} -p COM_PORT -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size ${{ matrix.flash_size }} --flash_freq 40m 0x1000 bootloader.bin 0x8000 partition-table.bin 0x10000 esp32-xbee.bin 0x210000 www.bin
+        ```
+        
+        ### Using ESP-IDF
+        ```bash
+        idf.py -p COM_PORT flash
+        ```
+        
+        ## Hardware Configuration
+        
+        ### ${{ matrix.board_name }} Pin Mapping
+        **Status LEDs:**
+        EOF
+        
+        # Добавляем специфичные для чипа пины
+        if [ "${{ matrix.target }}" = "esp32" ]; then
+          cat >> release/${{ matrix.target }}/README.md << 'EOF'
+        - Red LED: GPIO 21
+        - Green LED: GPIO 22  
+        - Blue LED: GPIO 23
+        - RSSI LED: GPIO 18
+        - Sleep LED: GPIO 27
+        - Assoc LED: GPIO 25
+        
+        **UART (Default):**
+        - TX: GPIO 1
+        - RX: GPIO 3
+        - RTS: GPIO 14
+        - CTS: GPIO 33
+        
+        **Button:** GPIO 0
+        EOF
+        elif [ "${{ matrix.target }}" = "esp32c3" ]; then
+          cat >> release/${{ matrix.target }}/README.md << 'EOF'
+        - Red LED: GPIO 8
+        - Green LED: GPIO 9
+        - Blue LED: GPIO 10
+        - RSSI LED: GPIO 2
+        - Sleep LED: GPIO 3
+        - Assoc LED: GPIO 4
+        
+        **UART (Default):**
+        - TX: GPIO 21
+        - RX: GPIO 20
+        - RTS: GPIO 5
+        - CTS: GPIO 6
+        
+        **Button:** GPIO 0
+        EOF
+        elif [ "${{ matrix.target }}" = "esp32s3" ]; then
+          cat >> release/${{ matrix.target }}/README.md << 'EOF'
+        - Red LED: GPIO 4
+        - Green LED: GPIO 5
+        - Blue LED: GPIO 6
+        - RSSI LED: GPIO 18
+        - Sleep LED: GPIO 21
+        - Assoc LED: GPIO 47
+        
+        **UART (Default):**
+        - TX: GPIO 43
+        - RX: GPIO 44
+        - RTS: GPIO 16
+        - CTS: GPIO 15
+        
+        **Button:** GPIO 0
+        EOF
+        elif [ "${{ matrix.target }}" = "esp32c6" ]; then
+          cat >> release/${{ matrix.target }}/README.md << 'EOF'
+        - Red LED: GPIO 4
+        - Green LED: GPIO 5
+        - Blue LED: GPIO 6
+        - RSSI LED: GPIO 18
+        - Sleep LED: GPIO 19
+        - Assoc LED: GPIO 20
+        
+        **UART (Default):**
+        - TX: GPIO 16
+        - RX: GPIO 17
+        - RTS: GPIO 4
+        - CTS: GPIO 5
+        
+        **Button:** GPIO 9
+        EOF
+        fi
+        
+        cat >> release/${{ matrix.target }}/README.md << 'EOF'
+        
+        ## Features
+        - Dual NTRIP server support
+        - NTRIP client functionality  
+        - Serial Commands for GNSS configuration
+        - SD Card logging with daily RTCM rotation
+        - Web-based configuration interface
+        - WiFi AP and STA modes
+        - Bluetooth connectivity
+        - Status LED indicators
+        
+        ## First Time Setup
+        1. Flash the firmware
+        2. Connect to ESP32_NTRIP WiFi network (password: 12345678)
+        3. Open browser and navigate to http://192.168.4.1
+        4. Configure your WiFi and NTRIP settings
+        EOF
+        
+    - name: Create archive
+      run: |
+        cd release
+        tar -czf esp32-ntrip-duo-${{ matrix.target }}-$(date +%Y%m%d).tar.gz ${{ matrix.target }}/
+        
+    - name: Upload firmware artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: firmware-${{ matrix.target }}
+        path: release/${{ matrix.target }}/
+        
+    - name: Upload archive artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: archive-${{ matrix.target }}
+        path: release/*.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.create_release)
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts/
+        
+    - name: Prepare release files
+      run: |
+        mkdir -p release_files
+        
+        # Копируем архивы
+        find artifacts -name "*.tar.gz" -exec cp {} release_files/ \;
+        
+        # Создаем общий README
+        cat > release_files/README.md << 'EOF'
+        # ESP32 NTRIP DUO - Firmware Release
+        
+        This release contains pre-compiled firmware for multiple ESP32 variants:
+        
+        ## Available Targets
+        - **ESP32** - Original ESP32 chip (esp32-ntrip-duo-esp32-*.tar.gz)
+        - **ESP32-C3** - ESP32-C3 with RISC-V core (esp32-ntrip-duo-esp32c3-*.tar.gz)
+        - **ESP32-S3** - ESP32-S3 with enhanced features (esp32-ntrip-duo-esp32s3-*.tar.gz)  
+        - **ESP32-C6** - ESP32-C6 with WiFi 6 support (esp32-ntrip-duo-esp32c6-*.tar.gz)
+        
+        ## What's New
+        - ✅ Serial Commands for remote GNSS configuration
+        - ✅ SD Card Logging with daily RTCM data rotation
+        - ✅ Extended ESP32-S3 and ESP32-C6 support
+        - ✅ ESP-IDF 6.0 compatibility
+        - ✅ Enhanced web interface
+        
+        ## Quick Start
+        1. Download the appropriate .tar.gz file for your ESP32 variant
+        2. Extract the archive
+        3. Follow the README.md inside for flashing instructions
+        4. Connect to ESP32_NTRIP WiFi network (password: 12345678)
+        5. Configure via web interface at http://192.168.4.1
+        
+        ## Hardware Requirements
+        - ESP32, ESP32-S3, or ESP32-C6 development board
+        - GNSS receiver with UART interface
+        - Optional: SD card for data logging
+        - Optional: Status LEDs on configured GPIO pins
+        
+        ## Support
+        - Issues: https://github.com/danusha2345/esp32-ntrip-DUO_danusha/issues
+        - Wiki: Check repository wiki for detailed setup guides
+        EOF
+        
+        # Показываем что у нас получилось
+        ls -la release_files/
+        
+    - name: Get version
+      id: version
+      run: |
+        if [[ $GITHUB_REF == refs/tags/* ]]; then
+          echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        else
+          echo "version=v$(date +%Y.%m.%d)" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.version.outputs.version }}
+        name: ESP32 NTRIP DUO ${{ steps.version.outputs.version }}
+        body: |
+          ## ESP32 NTRIP DUO Firmware Release ${{ steps.version.outputs.version }}
+          
+          ### ✨ New Features
+          - 🎯 **Serial Commands**: Remote GNSS module configuration via web interface
+          - 💾 **SD Card Logging**: Automatic RTCM data logging with daily file rotation
+          - 🔧 **Multi-chip Support**: Native support for ESP32, ESP32-S3, and ESP32-C6
+          
+          ### 🔧 Improvements  
+          - Updated for ESP-IDF 6.0 compatibility
+          - Enhanced web interface with new controls
+          - Conditional GPIO pin mappings for different chips
+          - Fixed deprecated function calls and task signatures
+          
+          ### 📦 Downloads
+          Choose the appropriate firmware for your hardware:
+          
+          - **esp32-ntrip-duo-esp32-*.tar.gz** - For original ESP32 boards
+          - **esp32-ntrip-duo-esp32c3-*.tar.gz** - For ESP32-C3 boards
+          - **esp32-ntrip-duo-esp32s3-*.tar.gz** - For ESP32-S3 boards  
+          - **esp32-ntrip-duo-esp32c6-*.tar.gz** - For ESP32-C6 boards
+          
+          Each archive contains:
+          - Pre-compiled firmware binaries
+          - Flashing instructions and configuration
+          - Hardware pin mapping documentation
+          - Setup and configuration guides
+          
+          ### 🚀 Quick Flash (using esptool)
+          ```bash
+          # Extract archive and navigate to folder
+          tar -xzf esp32-ntrip-duo-esp32-*.tar.gz
+          cd esp32/
+          
+          # Flash firmware (replace COM_PORT with your port)
+          python -m esptool --chip esp32 -p COM_PORT -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size 4MB --flash_freq 40m 0x1000 bootloader.bin 0x8000 partition-table.bin 0x10000 esp32-xbee.bin 0x210000 www.bin
+          ```
+          
+          ### 🔗 First Time Setup
+          1. Flash appropriate firmware for your ESP32 variant
+          2. Connect to **ESP32_NTRIP** WiFi (password: `12345678`)
+          3. Navigate to http://192.168.4.1 in your browser
+          4. Configure WiFi, NTRIP servers, and other settings
+          
+          ---
+          
+          **Full Changelog**: https://github.com/danusha2345/esp32-ntrip-DUO_danusha/compare/v1.0.0...${{ steps.version.outputs.version }}
+        files: release_files/*
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

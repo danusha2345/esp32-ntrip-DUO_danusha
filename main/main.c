@@ -42,6 +42,8 @@
 // Button GPIO definitions based on chip type
 #ifdef CONFIG_IDF_TARGET_ESP32
 #define BUTTON_GPIO GPIO_NUM_0
+#elif defined(CONFIG_IDF_TARGET_ESP32C3)
+#define BUTTON_GPIO GPIO_NUM_0
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
 #define BUTTON_GPIO GPIO_NUM_0
 #elif defined(CONFIG_IDF_TARGET_ESP32C6)
