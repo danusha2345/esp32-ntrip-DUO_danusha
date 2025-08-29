@@ -1,2 +1,19 @@
 /build
 /.vscode
+
+# ESP-IDF generated files
+sdkconfig
+sdkconfig.old
+dependencies.lock
+
+# Build outputs
+build_output/
+*.bin
+*.elf
+*.map
+
+# IDE files
+.idea/
+*.swp
+*.swo
+*~

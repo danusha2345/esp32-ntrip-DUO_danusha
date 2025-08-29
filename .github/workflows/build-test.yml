@@ -23,12 +23,32 @@ jobs:
     - name: Setup ESP-IDF
       uses: espressif/esp-idf-ci-action@v1
       with:
-        esp_idf_version: v5.2
-        target: ${{ matrix.target }}
+        esp_idf_version: v5.3
 
-    - name: Set target configuration
+    - name: Clean and set target configuration
       run: |
+        # Full clean to avoid any conflicts
+        rm -rf build/ sdkconfig sdkconfig.old
+        
+        # Set environment variable for target
+        export IDF_TARGET=${{ matrix.target }}
+        echo "IDF_TARGET=${{ matrix.target }}" >> $GITHUB_ENV
+        
+        # Set target with force regeneration
         idf.py set-target ${{ matrix.target }}
+        
+        # Copy target-specific sdkconfig if exists
+        if [ -f "sdkconfig.${{ matrix.target }}" ]; then
+          echo "Using target-specific configuration for ${{ matrix.target }}"
+          cp "sdkconfig.${{ matrix.target }}" sdkconfig
+        fi
+        
+        # Show current configuration status
+        echo "=== Configuration Status ==="
+        echo "IDF_TARGET: $IDF_TARGET"
+        if [ -f "sdkconfig" ]; then
+          echo "Active sdkconfig target: $(grep '^CONFIG_IDF_TARGET=' sdkconfig || echo 'not found')"
+        fi
         
     - name: Build firmware
       run: |
