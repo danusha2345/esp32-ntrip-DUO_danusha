@@ -32,7 +32,17 @@
 #include <esp_ota_ops.h>
 #include <esp_wifi_ap_get_sta_list.h>
 #include <stream_stats.h>
+#ifdef CONFIG_IDF_TARGET_ESP32
 #include <esp32/rom/crc.h>
+#elif defined(CONFIG_IDF_TARGET_ESP32C3)
+#include <esp32c3/rom/crc.h>
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+#include <esp32s3/rom/crc.h>
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
+#include <esp32c6/rom/crc.h>
+#else
+#include <rom/crc.h>
+#endif
 #include <lwip/sockets.h>
 #include <esp_timer.h>
 #include "web_server.h"

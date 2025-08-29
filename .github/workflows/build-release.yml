@@ -15,7 +15,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: espressif/idf:v5.3
+    container: espressif/idf:v5.5
     strategy:
       matrix:
         target: [esp32, esp32c3, esp32s3, esp32c6]
@@ -70,11 +70,11 @@ jobs:
         # Use with ESP32 Flash Download Tool or esptool.py
         
         # Flash command:
-        # python -m esptool --chip ${{ matrix.target }} -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size ${{ matrix.flash_size }} --flash_freq 40m 0x1000 bootloader.bin 0x8000 partition-table.bin 0x10000 esp32-xbee.bin 0x210000 www.bin
+        # python -m esptool --chip ${{ matrix.target }} -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size ${{ matrix.flash_size }} --flash_freq 40m 0x1000 bootloader.bin 0x8000 partition-table.bin 0x10000 ${{ matrix.target }}-ntrip-duo.bin 0x210000 www.bin
         
         0x1000=bootloader.bin
         0x8000=partition-table.bin
-        0x10000=esp32-xbee.bin
+        0x10000=${{ matrix.target }}-ntrip-duo.bin
         0x210000=www.bin
         EOF
         
@@ -85,9 +85,9 @@ jobs:
         ## Files Description
         - `bootloader.bin` - ESP32 bootloader
         - `partition-table.bin` - Partition table
-        - `esp32-xbee.bin` - Main application firmware
+        - `${{ matrix.target }}-ntrip-duo.bin` - Main application firmware
         - `www.bin` - Web interface files
-        - `esp32-xbee.elf` - ELF file for debugging
+        - `${{ matrix.target }}-ntrip-duo.elf` - ELF file for debugging
         - `download.conf` - Flash configuration for ESP32 Flash Download Tool
         
         ## Flash Instructions
@@ -102,7 +102,7 @@ jobs:
         ```bash
         pip install esptool
         
-        python -m esptool --chip ${{ matrix.target }} -p COM_PORT -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size ${{ matrix.flash_size }} --flash_freq 40m 0x1000 bootloader.bin 0x8000 partition-table.bin 0x10000 esp32-xbee.bin 0x210000 www.bin
+        python -m esptool --chip ${{ matrix.target }} -p COM_PORT -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size ${{ matrix.flash_size }} --flash_freq 40m 0x1000 bootloader.bin 0x8000 partition-table.bin 0x10000 ${{ matrix.target }}-ntrip-duo.bin 0x210000 www.bin
         ```
         
         ### Using ESP-IDF
@@ -253,7 +253,7 @@ jobs:
         ## Available Targets
         - **ESP32** - Original ESP32 chip (esp32-ntrip-duo-esp32-*.tar.gz)
         - **ESP32-C3** - ESP32-C3 with RISC-V core (esp32-ntrip-duo-esp32c3-*.tar.gz)
-        - **ESP32-S3** - ESP32-S3 with enhanced features (esp32-ntrip-duo-esp32s3-*.tar.gz)  
+        - **ESP32-S3** - ESP32-S3 with enhanced features (esp32-ntrip-duo-esp32s3-*.tar.gz)
         - **ESP32-C6** - ESP32-C6 with WiFi 6 support (esp32-ntrip-duo-esp32c6-*.tar.gz)
         
         ## What's New
@@ -271,7 +271,7 @@ jobs:
         5. Configure via web interface at http://192.168.4.1
         
         ## Hardware Requirements
-        - ESP32, ESP32-S3, or ESP32-C6 development board
+        - ESP32, ESP32-C3, ESP32-S3, or ESP32-C6 development board
         - GNSS receiver with UART interface
         - Optional: SD card for data logging
         - Optional: Status LEDs on configured GPIO pins
@@ -304,7 +304,7 @@ jobs:
           ### ✨ New Features
           - 🎯 **Serial Commands**: Remote GNSS module configuration via web interface
           - 💾 **SD Card Logging**: Automatic RTCM data logging with daily file rotation
-          - 🔧 **Multi-chip Support**: Native support for ESP32, ESP32-S3, and ESP32-C6
+          - 🔧 **Multi-chip Support**: Native support for ESP32, ESP32-C3, ESP32-S3, and ESP32-C6
           
           ### 🔧 Improvements  
           - Updated for ESP-IDF 6.0 compatibility
@@ -317,7 +317,7 @@ jobs:
           
           - **esp32-ntrip-duo-esp32-*.tar.gz** - For original ESP32 boards
           - **esp32-ntrip-duo-esp32c3-*.tar.gz** - For ESP32-C3 boards
-          - **esp32-ntrip-duo-esp32s3-*.tar.gz** - For ESP32-S3 boards  
+          - **esp32-ntrip-duo-esp32s3-*.tar.gz** - For ESP32-S3 boards
           - **esp32-ntrip-duo-esp32c6-*.tar.gz** - For ESP32-C6 boards
           
           Each archive contains:
@@ -333,7 +333,7 @@ jobs:
           cd esp32/
           
           # Flash firmware (replace COM_PORT with your port)
-          python -m esptool --chip esp32 -p COM_PORT -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size 4MB --flash_freq 40m 0x1000 bootloader.bin 0x8000 partition-table.bin 0x10000 esp32-xbee.bin 0x210000 www.bin
+          python -m esptool --chip esp32 -p COM_PORT -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size 4MB --flash_freq 40m 0x1000 bootloader.bin 0x8000 partition-table.bin 0x10000 esp32-ntrip-duo.bin 0x210000 www.bin
           ```
           
           ### 🔗 First Time Setup

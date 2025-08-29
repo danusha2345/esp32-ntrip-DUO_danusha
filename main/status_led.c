@@ -22,12 +22,18 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
+#if CONFIG_IDF_TARGET_ESP32 || CONFIG_IDF_TARGET_ESP32S3
 #include "xtensa_api.h"
+#endif
 #include "freertos/portmacro.h"
 #include "status_led.h"
 #include <sys/queue.h>
 
+#if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32C6)
+#define LEDC_SPEED_MODE LEDC_LOW_SPEED_MODE
+#else
 #define LEDC_SPEED_MODE LEDC_HIGH_SPEED_MODE
+#endif
 
 // GPIO pin definitions based on chip type
 #ifdef CONFIG_IDF_TARGET_ESP32
