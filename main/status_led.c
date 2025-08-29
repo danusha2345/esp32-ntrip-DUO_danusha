@@ -16,28 +16,61 @@
  */
 
 #include <driver/ledc.h>
+#include <driver/gpio.h>
 #include <tasks.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
-#include "freertos/xtensa_api.h"
+#include "xtensa_api.h"
 #include "freertos/portmacro.h"
 #include "status_led.h"
 #include <sys/queue.h>
 
 #define LEDC_SPEED_MODE LEDC_HIGH_SPEED_MODE
 
+// GPIO pin definitions based on chip type
+#ifdef CONFIG_IDF_TARGET_ESP32
 #define STATUS_LED_RED_GPIO GPIO_NUM_21
 #define STATUS_LED_GREEN_GPIO GPIO_NUM_22
 #define STATUS_LED_BLUE_GPIO GPIO_NUM_23
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+#define STATUS_LED_RED_GPIO GPIO_NUM_4
+#define STATUS_LED_GREEN_GPIO GPIO_NUM_5
+#define STATUS_LED_BLUE_GPIO GPIO_NUM_6
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
+#define STATUS_LED_RED_GPIO GPIO_NUM_4
+#define STATUS_LED_GREEN_GPIO GPIO_NUM_5
+#define STATUS_LED_BLUE_GPIO GPIO_NUM_6
+#else
+// Default fallback for other chips
+#define STATUS_LED_RED_GPIO GPIO_NUM_21
+#define STATUS_LED_GREEN_GPIO GPIO_NUM_22
+#define STATUS_LED_BLUE_GPIO GPIO_NUM_23
+#endif
 #define STATUS_LED_RED_CHANNEL LEDC_CHANNEL_0
 #define STATUS_LED_GREEN_CHANNEL LEDC_CHANNEL_1
 #define STATUS_LED_BLUE_CHANNEL LEDC_CHANNEL_2
 
+// Additional LED GPIO definitions based on chip type
+#ifdef CONFIG_IDF_TARGET_ESP32
 #define STATUS_LED_RSSI_GPIO GPIO_NUM_18
 #define STATUS_LED_SLEEP_GPIO GPIO_NUM_27
 #define STATUS_LED_ASSOC_GPIO GPIO_NUM_25
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+#define STATUS_LED_RSSI_GPIO GPIO_NUM_18
+#define STATUS_LED_SLEEP_GPIO GPIO_NUM_21
+#define STATUS_LED_ASSOC_GPIO GPIO_NUM_47
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
+#define STATUS_LED_RSSI_GPIO GPIO_NUM_18
+#define STATUS_LED_SLEEP_GPIO GPIO_NUM_19
+#define STATUS_LED_ASSOC_GPIO GPIO_NUM_20
+#else
+// Default fallback for other chips
+#define STATUS_LED_RSSI_GPIO GPIO_NUM_18
+#define STATUS_LED_SLEEP_GPIO GPIO_NUM_27
+#define STATUS_LED_ASSOC_GPIO GPIO_NUM_25
+#endif
 #define STATUS_LED_RSSI_CHANNEL LEDC_CHANNEL_3
 #define STATUS_LED_SLEEP_CHANNEL LEDC_CHANNEL_4
 #define STATUS_LED_ASSOC_CHANNEL LEDC_CHANNEL_5
@@ -140,7 +173,7 @@ static void status_led_show(status_led_handle_t color) {
     status_led_set(0, 0, 0);
 }
 
-static void status_led_task() {
+static void status_led_task(void *pvParameters) {
     while (true) {
         // Wait for a color
         if (SLIST_EMPTY(&status_led_colors_list)) vTaskSuspend(NULL);

@@ -130,6 +130,9 @@ typedef struct config_item {
 #define KEY_CONFIG_WIFI_STA_DNS_A "w_sta_dns_a"
 #define KEY_CONFIG_WIFI_STA_DNS_B "w_sta_dns_b"
 
+// SD Logging
+#define KEY_CONFIG_SD_LOGGING_ACTIVE "sd_log_active"
+
 esp_err_t config_init();
 esp_err_t config_reset();
 

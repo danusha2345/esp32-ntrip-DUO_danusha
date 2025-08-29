@@ -29,6 +29,7 @@
 #include "esp_log.h"
 #include "driver/uart.h"
 #include "driver/ledc.h"
+#include "driver/gpio.h"
 #include "button.h"
 
 #include "config.h"
@@ -38,13 +39,25 @@
 #include "interface/ntrip.h"
 #include "tasks.h"
 
+// Button GPIO definitions based on chip type
+#ifdef CONFIG_IDF_TARGET_ESP32
+#define BUTTON_GPIO GPIO_NUM_0
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+#define BUTTON_GPIO GPIO_NUM_0
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
+#define BUTTON_GPIO GPIO_NUM_9
+#else
+// Default fallback for other chips
+#define BUTTON_GPIO GPIO_NUM_0
+#endif
+
 static const char *TAG = "MAIN";
 
 static char *reset_reason_name(esp_reset_reason_t reason);
 
-static void reset_button_task() {
-    QueueHandle_t button_queue = button_init(PIN_BIT(GPIO_NUM_0));
-    gpio_set_pull_mode(GPIO_NUM_0, GPIO_PULLUP_ONLY);
+static void reset_button_task(void *pvParameters) {
+    QueueHandle_t button_queue = button_init(PIN_BIT(BUTTON_GPIO));
+    gpio_set_pull_mode(BUTTON_GPIO, GPIO_PULLUP_ONLY);
     while (true) {
         button_event_t button_ev;
         if (xQueueReceive(button_queue, &button_ev, 1000 / portTICK_PERIOD_MS)) {
@@ -84,9 +97,9 @@ void app_main()
 
     esp_reset_reason_t reset_reason = esp_reset_reason();
 
-    const esp_app_desc_t *app_desc = esp_ota_get_app_description();
+    const esp_app_desc_t *app_desc = esp_app_get_description();
     char elf_buffer[17];
-    esp_ota_get_app_elf_sha256(elf_buffer, sizeof(elf_buffer));
+    esp_app_get_elf_sha256(elf_buffer, sizeof(elf_buffer));
 
     uart_nmea("$PESP,INIT,START,%s,%s", app_desc->version, reset_reason_name(reset_reason));
 

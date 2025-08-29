@@ -137,7 +137,7 @@ static void ntrip_server_task(void *ctx) {
 
         snprintf(buffer, BUFFER_SIZE, "SOURCE %s /%s" NEWLINE \
                 "Source-Agent: NTRIP %s/%s" NEWLINE \
-                NEWLINE, password, mountpoint, NTRIP_SERVER_NAME, &esp_ota_get_app_description()->version[1]);
+                NEWLINE, password, mountpoint, NTRIP_SERVER_NAME, &esp_app_get_description()->version[1]);
 
         int err = write(sock, buffer, strlen(buffer));
         ERROR_ACTION(TAG, err < 0, goto _error, "Could not send request to caster: %d %s", errno, strerror(errno));

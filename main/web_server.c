@@ -28,6 +28,7 @@
 #include <core_dump.h>
 #include <util.h>
 #include <lwip/inet.h>
+#include <driver/uart.h>
 #include <esp_ota_ops.h>
 #include <esp_wifi_ap_get_sta_list.h>
 #include <stream_stats.h>
@@ -243,10 +244,10 @@ static esp_err_t core_dump_get_handler(httpd_req_t *req) {
 
     httpd_resp_set_type(req, "application/octet-stream");
 
-    const esp_app_desc_t *app_desc = esp_ota_get_app_description();
+    const esp_app_desc_t *app_desc = esp_app_get_description();
 
     char elf_sha256[7];
-    esp_ota_get_app_elf_sha256(elf_sha256, sizeof(elf_sha256));
+    esp_app_get_elf_sha256(elf_sha256, sizeof(elf_sha256));
 
     time_t t = time(NULL);
     char date[20] = "\0";
@@ -426,7 +427,7 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
 
     cJSON *root = cJSON_CreateObject();
 
-    const esp_app_desc_t *app_desc = esp_ota_get_app_description();
+    const esp_app_desc_t *app_desc = esp_app_get_description();
     cJSON_AddStringToObject(root, "version", app_desc->version);
 
     int config_item_count;
@@ -732,6 +733,99 @@ static esp_err_t wifi_scan_get_handler(httpd_req_t *req) {
     return json_response(req, root);
 }
 
+static esp_err_t sd_log_status_handler(httpd_req_t *req) {
+    if (check_auth(req) == ESP_FAIL) return ESP_FAIL;
+
+    cJSON *root = cJSON_CreateObject();
+    bool enabled = config_get_bool1(CONF_ITEM(KEY_CONFIG_SD_LOGGING_ACTIVE));
+    cJSON_AddBoolToObject(root, "enabled", enabled);
+    
+    return json_response(req, root);
+}
+
+static esp_err_t sd_log_toggle_handler(httpd_req_t *req) {
+    if (check_auth(req) == ESP_FAIL) return ESP_FAIL;
+
+    char buffer[256];
+    int ret = httpd_req_recv(req, buffer, sizeof(buffer) - 1);
+    if (ret <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to receive data");
+        return ESP_FAIL;
+    }
+    buffer[ret] = '\0';
+
+    cJSON *root = cJSON_Parse(buffer);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *enabled_item = cJSON_GetObjectItem(root, "enabled");
+    if (!enabled_item || !cJSON_IsBool(enabled_item)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing enabled field");
+        return ESP_FAIL;
+    }
+
+    bool enabled = cJSON_IsTrue(enabled_item);
+    config_set_bool1(KEY_CONFIG_SD_LOGGING_ACTIVE, enabled);
+    config_commit();
+
+    cJSON_Delete(root);
+
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "status", "ok");
+    cJSON_AddBoolToObject(resp, "enabled", enabled);
+    
+    return json_response(req, resp);
+}
+
+static esp_err_t serial_command_post_handler(httpd_req_t *req) {
+    if (check_auth(req) == ESP_FAIL) return ESP_FAIL;
+
+    char buffer[512];
+    int ret = httpd_req_recv(req, buffer, sizeof(buffer) - 1);
+    if (ret <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to receive data");
+        return ESP_FAIL;
+    }
+    buffer[ret] = '\0';
+
+    cJSON *root = cJSON_Parse(buffer);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *command = cJSON_GetObjectItem(root, "command");
+    if (!command || !cJSON_IsString(command)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing command field");
+        return ESP_FAIL;
+    }
+
+    // Отправляем команду через UART
+    const char *cmd = cJSON_GetStringValue(command);
+    uart_write_bytes(UART_NUM_0, cmd, strlen(cmd));
+    uart_write_bytes(UART_NUM_0, "\r\n", 2);
+
+    cJSON_Delete(root);
+
+    // Ждем ответа с таймаутом 2 секунды
+    char response[1024] = {0};
+    int len = uart_read_bytes(UART_NUM_0, response, sizeof(response) - 1, pdMS_TO_TICKS(2000));
+    if (len > 0) {
+        response[len] = '\0';
+    }
+
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "status", "ok");
+    cJSON_AddStringToObject(resp, "command", cmd);
+    cJSON_AddStringToObject(resp, "response", response);
+
+    return json_response(req, resp);
+}
+
 static esp_err_t register_uri_handler(httpd_handle_t server, const char *path, httpd_method_t method, esp_err_t (*handler)(httpd_req_t *r)) {
     httpd_uri_t uri_config_get = {
             .uri        = path,
@@ -769,6 +863,9 @@ static httpd_handle_t web_server_start(void)
         register_uri_handler(server, "/heap_info", HTTP_GET, heap_info_get_handler);
 
         register_uri_handler(server, "/wifi/scan", HTTP_GET, wifi_scan_get_handler);
+        register_uri_handler(server, "/serial/send", HTTP_POST, serial_command_post_handler);
+        register_uri_handler(server, "/sdlog/status", HTTP_GET, sd_log_status_handler);
+        register_uri_handler(server, "/sdlog/toggle", HTTP_POST, sd_log_toggle_handler);
 
         register_uri_handler(server, "/*", HTTP_GET, file_get_handler);
     }

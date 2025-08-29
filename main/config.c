@@ -27,6 +27,30 @@
 #include "config.h"
 #include <esp_netif.h>
 
+// GPIO pin definitions based on chip type
+#ifdef CONFIG_IDF_TARGET_ESP32
+#define DEFAULT_UART_TX_PIN GPIO_NUM_1
+#define DEFAULT_UART_RX_PIN GPIO_NUM_3
+#define DEFAULT_UART_RTS_PIN GPIO_NUM_14
+#define DEFAULT_UART_CTS_PIN GPIO_NUM_33
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+#define DEFAULT_UART_TX_PIN GPIO_NUM_43
+#define DEFAULT_UART_RX_PIN GPIO_NUM_44
+#define DEFAULT_UART_RTS_PIN GPIO_NUM_16
+#define DEFAULT_UART_CTS_PIN GPIO_NUM_15
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
+#define DEFAULT_UART_TX_PIN GPIO_NUM_16
+#define DEFAULT_UART_RX_PIN GPIO_NUM_17
+#define DEFAULT_UART_RTS_PIN GPIO_NUM_4
+#define DEFAULT_UART_CTS_PIN GPIO_NUM_5
+#else
+// Default fallback for other chips
+#define DEFAULT_UART_TX_PIN GPIO_NUM_1
+#define DEFAULT_UART_RX_PIN GPIO_NUM_3
+#define DEFAULT_UART_RTS_PIN GPIO_NUM_14
+#define DEFAULT_UART_CTS_PIN GPIO_NUM_33
+#endif
+
 static const char *TAG = "CONFIG";
 static const char *STORAGE = "config";
 
@@ -172,19 +196,19 @@ const config_item_t CONFIG_ITEMS[] = {
         }, {
                 .key = KEY_CONFIG_UART_TX_PIN,
                 .type = CONFIG_ITEM_TYPE_UINT8,
-                .def.uint8 = GPIO_NUM_1
+                .def.uint8 = DEFAULT_UART_TX_PIN
         }, {
                 .key = KEY_CONFIG_UART_RX_PIN,
                 .type = CONFIG_ITEM_TYPE_UINT8,
-                .def.uint8 = GPIO_NUM_3
+                .def.uint8 = DEFAULT_UART_RX_PIN
         }, {
                 .key = KEY_CONFIG_UART_RTS_PIN,
                 .type = CONFIG_ITEM_TYPE_UINT8,
-                .def.uint8 = GPIO_NUM_14
+                .def.uint8 = DEFAULT_UART_RTS_PIN
         }, {
                 .key = KEY_CONFIG_UART_CTS_PIN,
                 .type = CONFIG_ITEM_TYPE_UINT8,
-                .def.uint8 = GPIO_NUM_33
+                .def.uint8 = DEFAULT_UART_CTS_PIN
         }, {
                 .key = KEY_CONFIG_UART_BAUD_RATE,
                 .type = CONFIG_ITEM_TYPE_UINT32,
@@ -294,6 +318,10 @@ const config_item_t CONFIG_ITEMS[] = {
                 .key = KEY_CONFIG_WIFI_STA_DNS_B,
                 .type = CONFIG_ITEM_TYPE_IP,
                 .def.uint32 = esp_netif_htonl(esp_netif_ip4_makeu32(1, 0, 0, 1))
+        }, {
+                .key = KEY_CONFIG_SD_LOGGING_ACTIVE,
+                .type = CONFIG_ITEM_TYPE_BOOL,
+                .def.bool1 = false
         }
 };
 
@@ -561,7 +589,7 @@ esp_err_t config_commit() {
     return nvs_commit(config_handle);
 }
 
-static void config_restart_task() {
+static void config_restart_task(void *pvParameters) {
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_restart();
 }
