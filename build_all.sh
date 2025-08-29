@@ -317,8 +317,18 @@ else
 fi
 
 echo
+# Copy release files to firmware_releases directory
+echo -e "${BLUE}Copying release files to firmware_releases...${NC}"
+mkdir -p firmware_releases
+cp -f $BUILD_DIR/*.tar.gz firmware_releases/
+echo -e "${GREEN}✓ Release files copied to firmware_releases/${NC}"
+
 echo -e "${BLUE}Release files:${NC}"
 ls -lh $BUILD_DIR/*.tar.gz
+
+echo
+echo -e "${BLUE}Firmware files in firmware_releases:${NC}"
+ls -lh firmware_releases/
 
 echo
 echo -e "${BLUE}Next steps:${NC}"

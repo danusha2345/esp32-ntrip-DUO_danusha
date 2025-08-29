@@ -159,12 +159,6 @@
 
             form.find(":input").on('change', checkDisableIfs);
 
-            $('#switch-uart').on('click', function() {
-                if (confirm("WARNING\n\nThese settings are mainly for development purposes and do not normally have to be changed. With a standard ESP32 XBee device the only setting you may want to change is the UART baud rate. DO NOT PROCEED unless you know what you are doing.")) {
-                    $(this).hide();
-                    checkDisableIfs();
-                }
-            });
 
             const projectVersionText = $('#project-version');
 
@@ -765,43 +759,6 @@
                             </div>
                         </div>
                     </div>
-                    <!--
-                    <div class="card mb-3">
-                        <div class="card-header">
-                            Bluetooth
-                            <div class="custom-control custom-switch d-inline float-right">
-                                <input type="checkbox" name="bt_active" value="1" class="custom-control-input" id="switch-bluetooth">
-                                <label class="custom-control-label" for="switch-wifi-bluetooth"></label>
-                            </div>
-                        </div>
-                        <div class="card-body" data-disable-if="#switch-bluetooth">
-                            <div class="form-row mb-3">
-                                <div class="col-8">
-                                    <label>Device name</label>
-                                    <div class="input-group">
-                                        <input type="text" name="bt_dev_name" class="form-control" maxlength="32" required>
-                                        <div class="input-group-append btn-group-toggle" data-toggle="buttons">
-                                            <label class="btn btn-outline-secondary active">
-                                                <input type="checkbox" name="bt_dev_vis" value="1" checked> Discoverable
-                                            </label>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="col">
-                                    <label>Pin code</label>
-                                    <div class="input-group">
-                                        <input type="number" name="bt_pin_code" class="form-control text-center" maxlength="1" min="0" max="9" pattern="[0-9]" oninput="autoTab(this)" required/>
-                                        <input type="number" name="bt_pin_code" class="form-control text-center" maxlength="1" min="0" max="9" pattern="[0-9]" oninput="autoTab(this)" required/>
-                                        <input type="number" name="bt_pin_code" class="form-control text-center" maxlength="1" min="0" max="9" pattern="[0-9]" oninput="autoTab(this)" required/>
-                                        <input type="number" name="bt_pin_code" class="form-control text-center" maxlength="1" min="0" max="9" pattern="[0-9]" oninput="autoTab(this)" required/>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    -->
-                </div>
-                <div class="col-xl-6">
                     <div class="card mb-3">
                         <div class="card-header">
                             WiFi hotspot
@@ -886,15 +843,49 @@
                             </div>
                         </div>
                     </div>
+                    <!--
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            Bluetooth
+                            <div class="custom-control custom-switch d-inline float-right">
+                                <input type="checkbox" name="bt_active" value="1" class="custom-control-input" id="switch-bluetooth">
+                                <label class="custom-control-label" for="switch-wifi-bluetooth"></label>
+                            </div>
+                        </div>
+                        <div class="card-body" data-disable-if="#switch-bluetooth">
+                            <div class="form-row mb-3">
+                                <div class="col-8">
+                                    <label>Device name</label>
+                                    <div class="input-group">
+                                        <input type="text" name="bt_dev_name" class="form-control" maxlength="32" required>
+                                        <div class="input-group-append btn-group-toggle" data-toggle="buttons">
+                                            <label class="btn btn-outline-secondary active">
+                                                <input type="checkbox" name="bt_dev_vis" value="1" checked> Discoverable
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col">
+                                    <label>Pin code</label>
+                                    <div class="input-group">
+                                        <input type="number" name="bt_pin_code" class="form-control text-center" maxlength="1" min="0" max="9" pattern="[0-9]" oninput="autoTab(this)" required/>
+                                        <input type="number" name="bt_pin_code" class="form-control text-center" maxlength="1" min="0" max="9" pattern="[0-9]" oninput="autoTab(this)" required/>
+                                        <input type="number" name="bt_pin_code" class="form-control text-center" maxlength="1" min="0" max="9" pattern="[0-9]" oninput="autoTab(this)" required/>
+                                        <input type="number" name="bt_pin_code" class="form-control text-center" maxlength="1" min="0" max="9" pattern="[0-9]" oninput="autoTab(this)" required/>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    -->
+                </div>
+                <div class="col-xl-6">
                     <div class="card mb-3 border border-warning">
                         <div class="card-header">
                             UART (main communication)
                             <small class="uart-stats stream-stats" data-stream="uart"></small>
-                            <div class="d-inline float-right">
-                                <a href="javascript:void(0)" id="switch-uart">Configure</a>
-                            </div>
                         </div>
-                        <div class="card-body" data-disable-if="#switch-uart" data-disable-if-condition=":visible">
+                        <div class="card-body">
                             <div class="form-row mb-3">
                                 <div class="col-8">
                                     <label class="d-block">UART controller</label>
@@ -1003,6 +994,27 @@
                                     <input type="number" name="uart_cts_pin" data-disable-if="input[type='checkbox'][name='uart_fc_cts']" class="form-control" placeholder="19" value="19" required>
                                 </div>
                             </div>
+                            
+                            <hr class="my-3" data-disable-if="#switch-uart" data-disable-if-condition=":visible">
+                            
+                            <!-- Serial Commands Section -->
+                            <div class="mt-3">
+                                <h6>Serial Commands</h6>
+                                <div class="form-group">
+                                    <label for="serialCommand">Command:</label>
+                                    <div class="input-group">
+                                        <input type="text" id="serialCommand" class="form-control" placeholder="Enter GNSS command (e.g., AT+RESET)">
+                                        <div class="input-group-append">
+                                            <button type="button" class="btn btn-primary" onclick="sendSerialCommand()">Send</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="serialResponse">Response:</label>
+                                    <textarea id="serialResponse" class="form-control" rows="3" readonly placeholder="Command response will appear here"></textarea>
+                                </div>
+                            </div>
+                            
                         </div>
                     </div>
                 </div>
@@ -1196,60 +1208,132 @@
                         </div>
                     </div>
 
+
+                </div>
+                <div class="col-xl-6">
+                    <!-- Socket Client Card -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            Socket Client
+                            <small class="socket-client-stats stream-stats" data-stream="socket_client"></small>
+                            <div class="custom-control custom-switch d-inline float-right">
+                                <input type="checkbox" name="sock_cli_active" value="1" class="custom-control-input" id="switch-socket-client">
+                                <label class="custom-control-label" for="switch-socket-client"></label>
+                            </div>
+                        </div>
+                        <div class="card-body" data-disable-if="#switch-socket-client">
+                            <div class="form-row mb-3">
+                                <div class="col-8">
+                                    <label>Host and port</label>
+                                    <div class="input-group">
+                                        <input type="text" name="sock_cli_host" class="form-control" style="flex-grow: 3" required>
+                                        <div class="input-group-append input-group-prepend">
+                                            <span class="input-group-text">:</span>
+                                        </div>
+                                        <input type="number" name="sock_cli_port" maxlength="5" min="1" max="65535" class="form-control" required>
+                                    </div>
+                                </div>
+                                <div class="col-4">
+                                    <label>Protocol</label>
+                                    <div class="btn-group btn-group-toggle d-flex" data-toggle="buttons">
+                                        <label class="btn btn-outline-primary active">
+                                            <input type="radio" name="sock_cli_tcp" value="1" checked> TCP
+                                        </label>
+                                        <label class="btn btn-outline-secondary">
+                                            <input type="radio" name="sock_cli_tcp" value="0"> UDP
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="form-row mb-3">
+                                <div class="col">
+                                    <label>Connection message <small class="text-muted">(optional)</small></label>
+                                    <input type="text" name="sock_cli_conn_msg" class="form-control" placeholder="Sent after connection">
+                                </div>
+                            </div>
+                            <div class="alert alert-info" role="alert">
+                                <strong>Socket Client:</strong> Connects to external TCP/UDP server. Forwards UART data bidirectionally with auto-reconnection.
+                            </div>
+                        </div>
                     </div>
+
+                    <!-- Socket Server Card -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            Socket Server
+                            <small class="socket-server-stats stream-stats" data-stream="socket_server"></small>
+                            <div class="custom-control custom-switch d-inline float-right">
+                                <input type="checkbox" name="sock_srv_active" value="1" class="custom-control-input" id="switch-socket-server">
+                                <label class="custom-control-label" for="switch-socket-server"></label>
+                            </div>
+                        </div>
+                        <div class="card-body" data-disable-if="#switch-socket-server">
+                            <div class="form-row mb-3">
+                                <div class="col-6">
+                                    <div class="form-group">
+                                        <div class="custom-control custom-switch">
+                                            <input type="checkbox" name="sock_srv_tcp_active" value="1" class="custom-control-input" id="switch-tcp-server">
+                                            <label class="custom-control-label" for="switch-tcp-server">TCP Server</label>
+                                        </div>
+                                        <div class="input-group mt-2">
+                                            <div class="input-group-prepend">
+                                                <span class="input-group-text">Port:</span>
+                                            </div>
+                                            <input type="number" name="sock_srv_tcp_port" min="1" max="65535" value="8880" class="form-control" data-disable-if="#switch-tcp-server" data-disable-if-condition=":not(:checked)" required>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-group">
+                                        <div class="custom-control custom-switch">
+                                            <input type="checkbox" name="sock_srv_udp_active" value="1" class="custom-control-input" id="switch-udp-server">
+                                            <label class="custom-control-label" for="switch-udp-server">UDP Server</label>
+                                        </div>
+                                        <div class="input-group mt-2">
+                                            <div class="input-group-prepend">
+                                                <span class="input-group-text">Port:</span>
+                                            </div>
+                                            <input type="number" name="sock_srv_udp_port" min="1" max="65535" value="8881" class="form-control" data-disable-if="#switch-udp-server" data-disable-if-condition=":not(:checked)" required>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="alert alert-info" role="alert">
+                                <strong>Socket Server:</strong> Forwards UART data to/from TCP/UDP clients. Multiple clients can connect simultaneously.
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+            <div class="row">
+                <div class="col">
+                    <input type="submit" class="form-control">
                 </div>
             </div>
         </form>
-        
-        <!-- Serial Commands Section -->
-        <div class="card mt-3">
-            <div class="card-header">
-                <h5 class="mb-0">
-                    <button class="btn btn-link collapsed" data-toggle="collapse" data-target="#collapseSerial">
-                        Serial Commands
-                    </button>
-                </h5>
-            </div>
-            <div id="collapseSerial" class="collapse" data-parent="#accordion">
-                <div class="card-body">
-                    <div class="form-group">
-                        <label for="serialCommand">Command:</label>
-                        <input type="text" id="serialCommand" class="form-control" placeholder="Enter GNSS command (e.g., AT+RESET)">
-                    </div>
-                    <button type="button" class="btn btn-primary" onclick="sendSerialCommand()">Send Command</button>
-                    <div class="mt-3">
-                        <label for="serialResponse">Response:</label>
-                        <textarea id="serialResponse" class="form-control" rows="5" readonly></textarea>
-                    </div>
-                </div>
-            </div>
-        </div>
 
         <!-- SD Card Logging Section -->
         <div class="card mt-3">
             <div class="card-header">
                 <h5 class="mb-0">
-                    <button class="btn btn-link collapsed" data-toggle="collapse" data-target="#collapseSDLog">
-                        SD Card Logging
-                    </button>
+                    SD Card Logging
                 </h5>
             </div>
-            <div id="collapseSDLog" class="collapse" data-parent="#accordion">
-                <div class="card-body">
-                    <div class="form-group">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="sdLogEnabled">
-                            <label class="form-check-label" for="sdLogEnabled">
-                                Enable SD Card Logging
-                            </label>
-                        </div>
-                        <small class="form-text text-muted">
-                            Log RTCM data to SD card. Files are rotated daily (YYYYMMDD.rtcm format).
-                        </small>
+            <div class="card-body">
+                <div class="form-group">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="sdLogEnabled">
+                        <label class="form-check-label" for="sdLogEnabled">
+                            Enable SD Card Logging
+                        </label>
                     </div>
-                    <div id="sdLogStatus" class="alert alert-info" style="display: none;">
-                        <strong>Status:</strong> <span id="sdLogStatusText">Unknown</span>
-                    </div>
+                    <small class="form-text text-muted">
+                        Log RTCM data to SD card. Files are rotated daily (YYYYMMDD.rtcm format).
+                    </small>
+                </div>
+                <div id="sdLogStatus" class="alert alert-info" style="display: none;">
+                    <strong>Status:</strong> <span id="sdLogStatusText">Unknown</span>
                 </div>
             </div>
         </div>

@@ -133,6 +133,20 @@ typedef struct config_item {
 // SD Logging
 #define KEY_CONFIG_SD_LOGGING_ACTIVE "sd_log_active"
 
+// Socket Server
+#define KEY_CONFIG_SOCKET_SERVER_ACTIVE "sock_srv_active"
+#define KEY_CONFIG_SOCKET_SERVER_TCP_ACTIVE "sock_srv_tcp_active"
+#define KEY_CONFIG_SOCKET_SERVER_TCP_PORT "sock_srv_tcp_port"
+#define KEY_CONFIG_SOCKET_SERVER_UDP_ACTIVE "sock_srv_udp_active"
+#define KEY_CONFIG_SOCKET_SERVER_UDP_PORT "sock_srv_udp_port"
+
+// Socket Client
+#define KEY_CONFIG_SOCKET_CLIENT_ACTIVE "sock_cli_active"
+#define KEY_CONFIG_SOCKET_CLIENT_TCP "sock_cli_tcp"
+#define KEY_CONFIG_SOCKET_CLIENT_HOST "sock_cli_host"
+#define KEY_CONFIG_SOCKET_CLIENT_PORT "sock_cli_port"
+#define KEY_CONFIG_SOCKET_CLIENT_CONNECT_MESSAGE "sock_cli_conn_msg"
+
 esp_err_t config_init();
 esp_err_t config_reset();
 
@@ -172,5 +186,18 @@ esp_err_t config_get_primitive(const config_item_t *item, void *out_value);
 
 esp_err_t config_commit();
 void config_restart();
+
+// Socket configuration helper functions
+bool is_socket_server_enabled(void);
+bool is_tcp_server_enabled(void);
+bool is_udp_server_enabled(void);
+int get_tcp_server_port(void);
+int get_udp_server_port(void);
+
+bool is_socket_client_enabled(void);
+bool is_socket_client_tcp(void);
+const char* get_socket_client_host(void);
+int get_socket_client_port(void);
+const char* get_socket_client_connect_message(void);
 
 #endif //ESP32_XBEE_CONFIG_H

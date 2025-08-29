@@ -327,6 +327,52 @@ const config_item_t CONFIG_ITEMS[] = {
                 .key = KEY_CONFIG_SD_LOGGING_ACTIVE,
                 .type = CONFIG_ITEM_TYPE_BOOL,
                 .def.bool1 = false
+        },
+
+        // Socket Server
+        {
+                .key = KEY_CONFIG_SOCKET_SERVER_ACTIVE,
+                .type = CONFIG_ITEM_TYPE_BOOL,
+                .def.bool1 = false
+        }, {
+                .key = KEY_CONFIG_SOCKET_SERVER_TCP_ACTIVE,
+                .type = CONFIG_ITEM_TYPE_BOOL,
+                .def.bool1 = false
+        }, {
+                .key = KEY_CONFIG_SOCKET_SERVER_TCP_PORT,
+                .type = CONFIG_ITEM_TYPE_UINT16,
+                .def.uint16 = 8880
+        }, {
+                .key = KEY_CONFIG_SOCKET_SERVER_UDP_ACTIVE,
+                .type = CONFIG_ITEM_TYPE_BOOL,
+                .def.bool1 = false
+        }, {
+                .key = KEY_CONFIG_SOCKET_SERVER_UDP_PORT,
+                .type = CONFIG_ITEM_TYPE_UINT16,
+                .def.uint16 = 8881
+        },
+
+        // Socket Client
+        {
+                .key = KEY_CONFIG_SOCKET_CLIENT_ACTIVE,
+                .type = CONFIG_ITEM_TYPE_BOOL,
+                .def.bool1 = false
+        }, {
+                .key = KEY_CONFIG_SOCKET_CLIENT_TCP,
+                .type = CONFIG_ITEM_TYPE_BOOL,
+                .def.bool1 = true
+        }, {
+                .key = KEY_CONFIG_SOCKET_CLIENT_HOST,
+                .type = CONFIG_ITEM_TYPE_STRING,
+                .def.str = ""
+        }, {
+                .key = KEY_CONFIG_SOCKET_CLIENT_PORT,
+                .type = CONFIG_ITEM_TYPE_UINT16,
+                .def.uint16 = 8880
+        }, {
+                .key = KEY_CONFIG_SOCKET_CLIENT_CONNECT_MESSAGE,
+                .type = CONFIG_ITEM_TYPE_STRING,
+                .def.str = ""
         }
 };
 
@@ -603,4 +649,61 @@ void config_restart() {
     uart_nmea("$PESP,CFG,RESTARTING");
 
     xTaskCreate(config_restart_task, "config_restart_task", 4096, NULL, TASK_PRIORITY_MAX, NULL);
+}
+
+// Socket configuration helper functions
+bool is_socket_server_enabled(void) {
+    return config_get_bool1(CONF_ITEM(KEY_CONFIG_SOCKET_SERVER_ACTIVE));
+}
+
+bool is_tcp_server_enabled(void) {
+    return is_socket_server_enabled() && 
+           config_get_bool1(CONF_ITEM(KEY_CONFIG_SOCKET_SERVER_TCP_ACTIVE));
+}
+
+bool is_udp_server_enabled(void) {
+    return is_socket_server_enabled() && 
+           config_get_bool1(CONF_ITEM(KEY_CONFIG_SOCKET_SERVER_UDP_ACTIVE));
+}
+
+int get_tcp_server_port(void) {
+    return config_get_u16(CONF_ITEM(KEY_CONFIG_SOCKET_SERVER_TCP_PORT));
+}
+
+int get_udp_server_port(void) {
+    return config_get_u16(CONF_ITEM(KEY_CONFIG_SOCKET_SERVER_UDP_PORT));
+}
+
+bool is_socket_client_enabled(void) {
+    return config_get_bool1(CONF_ITEM(KEY_CONFIG_SOCKET_CLIENT_ACTIVE));
+}
+
+bool is_socket_client_tcp(void) {
+    return config_get_bool1(CONF_ITEM(KEY_CONFIG_SOCKET_CLIENT_TCP));
+}
+
+const char* get_socket_client_host(void) {
+    const config_item_t *item = CONF_ITEM(KEY_CONFIG_SOCKET_CLIENT_HOST);
+    if (!item) return "";
+    
+    char *host = NULL;
+    if (config_get_str_blob_alloc(item, (void**)&host) == ESP_OK) {
+        return host;
+    }
+    return "";
+}
+
+int get_socket_client_port(void) {
+    return config_get_u16(CONF_ITEM(KEY_CONFIG_SOCKET_CLIENT_PORT));
+}
+
+const char* get_socket_client_connect_message(void) {
+    const config_item_t *item = CONF_ITEM(KEY_CONFIG_SOCKET_CLIENT_CONNECT_MESSAGE);
+    if (!item) return "";
+    
+    char *msg = NULL;
+    if (config_get_str_blob_alloc(item, (void**)&msg) == ESP_OK) {
+        return msg;
+    }
+    return "";
 }

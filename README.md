@@ -16,11 +16,16 @@ In this version Installation is simplified, with just a single bin file. You can
 This software can run on ESP32 WROOM type. Now added ESP32S3, ESP32C3, ESP32S2  Just choose correct bin file!
 For ESP32S2 if ESPHome is not connecting (it didn't with S2mini) You can use https://tasmota.github.io/install/ to install with single bin file.
 ## Features
-- WiFi Station
-- WiFi Hotspot
-- Web Interface
-- UART configuration
-- Two NTRIP Servers
+- **WiFi Station & Hotspot** - Connect to existing WiFi network or create your own access point
+- **Web Interface** - Complete configuration through browser-based interface
+- **Dual NTRIP Servers** - Simultaneous connection to two NTRIP services (e.g., Onocoy and RTK Direct)
+- **TCP/UDP Socket Server** - Host socket services for client connections
+- **TCP/UDP Socket Client** - Connect to external socket servers
+- **UART Configuration** - Full control over serial communication parameters
+- **SD Card Logging** - Log RTCM data to SD card with daily file rotation
+- **Status LED Control** - Visual feedback with RGB LED support
+- **Serial Commands** - Send commands directly through web interface
+- **Multi-platform Support** - ESP32, ESP32-S3, ESP32-C3, ESP32-C6
 
 
 ## Help
@@ -82,7 +87,16 @@ idf.py flash
 - **ESP32-C6**: Latest ESP32-C6 with WiFi 6 support
 
 ### Pin Connections
-See [PIN_MAPPING.md](docs/PIN_MAPPING.md) for detailed GPIO assignments.
+
+**UART (Default):**
+- TX: GPIO1, RX: GPIO3 (all variants)
+
+**Status LED (Common Anode RGB):**
+- **ESP32**: Red=GPIO21, Green=GPIO22, Blue=GPIO23
+- **ESP32-S3**: Red=GPIO4, Green=GPIO5, Blue=GPIO6
+
+**SD Card (Optional for logging):**
+- MISO: GPIO2, MOSI: GPIO15, CLK: GPIO14, CS: GPIO13
 
 **Basic Connection:**
 - Connect GNSS TX to ESP32 RX pin
@@ -91,20 +105,22 @@ See [PIN_MAPPING.md](docs/PIN_MAPPING.md) for detailed GPIO assignments.
 - Optional: Status LEDs on configured GPIO pins
 - Optional: SD card for data logging
 
-## 🔌 Hardware Setup
+## ⚙️ Configuration
 
-### Supported Boards
-- **ESP32**: Original ESP32 development boards
-- **ESP32-C3**: ESP32-C3 with RISC-V core and USB JTAG
-- **ESP32-S3**: ESP32-S3 based boards with enhanced GPIO
-- **ESP32-C6**: Latest ESP32-C6 with WiFi 6 support
+### Web Interface Features
+- **Network Configuration** - WiFi Station and Hotspot settings
+- **NTRIP Servers** - Configure dual NTRIP server connections  
+- **Socket Services** - TCP/UDP Server and Client configuration
+- **UART Settings** - Baud rate, data bits, parity, stop bits
+- **Serial Commands** - Send AT commands or custom data
+- **SD Card Logging** - Enable/disable data logging with status display
+- **Admin Panel** - Security and access control
+- **Status Monitoring** - Real-time connection and data flow status
 
-### Pin Connections
-See [PIN_MAPPING.md](docs/PIN_MAPPING.md) for detailed GPIO assignments.
-
-**Basic Connection:**
-- Connect GNSS TX to ESP32 RX pin
-- Connect GNSS RX to ESP32 TX pin  
-- Connect GND to GND
-- Optional: Status LEDs on configured GPIO pins
-- Optional: SD card for data logging
+### Socket Server/Client
+The firmware includes full TCP/UDP socket functionality:
+- **Socket Server**: Host services on configurable ports (TCP/UDP)
+- **Socket Client**: Connect to remote socket servers
+- **Bidirectional Data Flow**: UART ↔ Socket data forwarding
+- **Multiple Clients**: Server supports multiple concurrent connections
+- **IPv6 Support**: Dual-stack IPv4/IPv6 compatibility

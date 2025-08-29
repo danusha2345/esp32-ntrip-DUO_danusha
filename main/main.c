@@ -18,6 +18,9 @@
 #include <web_server.h>
 #include <log.h>
 #include <status_led.h>
+#include "interface/socket_server.h"
+#include "interface/socket_client.h"
+#include "sd_logger.h"
 
 #include <esp_sntp.h>
 #include <core_dump.h>
@@ -145,8 +148,12 @@ void app_main()
     ntrip_server_init();
     ntrip_server_2_init();
 
+    // Initialize socket services
+    socket_server_init();
+    socket_client_init();
 
-
+    // Initialize SD logger
+    sd_logger_init();
 
     uart_nmea("$PESP,INIT,COMPLETE");
 
