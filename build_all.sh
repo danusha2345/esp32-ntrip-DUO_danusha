@@ -43,7 +43,17 @@ build_target() {
     echo -e "${YELLOW}=========================${NC}"
     
     # Clean previous build
-    rm -rf build/
+    if [ -d "build/" ]; then
+        echo -e "${BLUE}Cleaning build directory...${NC}"
+        chmod -R 755 build/ 2>/dev/null || true
+        rm -rf build/ || {
+            echo -e "${YELLOW}Warning: Could not remove build directory completely. Continuing...${NC}"
+            # Try alternative cleanup
+            find build/ -type f -exec chmod 644 {} \; 2>/dev/null || true
+            find build/ -type d -exec chmod 755 {} \; 2>/dev/null || true
+            rm -rf build/* 2>/dev/null || true
+        }
+    fi
     
     # Set target
     echo -e "${BLUE}Setting target to $target...${NC}"
@@ -63,11 +73,27 @@ build_target() {
         # Create target directory
         mkdir -p "$BUILD_DIR/$target"
         
-        # Copy binaries
+        # Copy binaries (project name changes based on target)
         cp build/bootloader/bootloader.bin "$BUILD_DIR/$target/"
         cp build/partition_table/partition-table.bin "$BUILD_DIR/$target/"
-        cp build/esp32-xbee.bin "$BUILD_DIR/$target/"
-        cp build/esp32-xbee.elf "$BUILD_DIR/$target/"
+        
+        # Find the main firmware files (project name varies by target)
+        MAIN_BIN=$(find build/ -maxdepth 1 -name "$target-ntrip-duo.bin" -o -name "esp32-ntrip-duo.bin" | head -1)
+        MAIN_ELF=$(find build/ -maxdepth 1 -name "$target-ntrip-duo.elf" -o -name "esp32-ntrip-duo.elf" | head -1)
+        
+        if [ -n "$MAIN_BIN" ]; then
+            cp "$MAIN_BIN" "$BUILD_DIR/$target/"
+            echo -e "${GREEN}  Copied main firmware: $(basename $MAIN_BIN)${NC}"
+        else
+            echo -e "${RED}  Warning: Main firmware .bin file not found${NC}"
+        fi
+        
+        if [ -n "$MAIN_ELF" ]; then
+            cp "$MAIN_ELF" "$BUILD_DIR/$target/"
+            echo -e "${GREEN}  Copied ELF file: $(basename $MAIN_ELF)${NC}"
+        else
+            echo -e "${RED}  Warning: Main firmware .elf file not found${NC}"
+        fi
         
         # Copy www.bin if exists
         if [ -f "build/www.bin" ]; then
@@ -317,11 +343,23 @@ else
 fi
 
 echo
-# Copy release files to firmware_releases directory
-echo -e "${BLUE}Copying release files to firmware_releases...${NC}"
+# Copy firmware directories to firmware_releases directory
+echo -e "${BLUE}Copying firmware builds to firmware_releases...${NC}"
 mkdir -p firmware_releases
-cp -f $BUILD_DIR/*.tar.gz firmware_releases/
-echo -e "${GREEN}✓ Release files copied to firmware_releases/${NC}"
+
+# Copy individual target builds to firmware_releases
+for target in "${TARGETS[@]}"; do
+    if [ -d "$BUILD_DIR/$target" ]; then
+        echo -e "${BLUE}Copying $target firmware to firmware_releases...${NC}"
+        rm -rf "firmware_releases/$target" 2>/dev/null || true
+        cp -r "$BUILD_DIR/$target" "firmware_releases/"
+        echo -e "${GREEN}✓ Copied $target firmware to firmware_releases/$target/${NC}"
+    fi
+done
+
+# Also copy archive files for releases
+cp -f $BUILD_DIR/*.tar.gz firmware_releases/ 2>/dev/null || true
+echo -e "${GREEN}✓ All firmware builds copied to firmware_releases/${NC}"
 
 echo -e "${BLUE}Release files:${NC}"
 ls -lh $BUILD_DIR/*.tar.gz

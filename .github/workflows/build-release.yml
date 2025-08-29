@@ -43,6 +43,20 @@ jobs:
       run: |
         . /opt/esp/idf/export.sh
         
+        # Clean any existing build directory
+        if [ -d "build/" ]; then
+          echo "Cleaning existing build directory..."
+          chmod -R 755 build/ 2>/dev/null || true
+          rm -rf build/ || {
+            echo "Warning: Could not remove build directory completely. Trying alternative cleanup..."
+            sudo rm -rf build/ 2>/dev/null || {
+              find build/ -type f -exec sudo chmod 644 {} \; 2>/dev/null || true
+              find build/ -type d -exec sudo chmod 755 {} \; 2>/dev/null || true
+              sudo rm -rf build/* 2>/dev/null || true
+            }
+          }
+        fi
+        
         # Set target
         echo "Setting target to ${{ matrix.target }}"
         idf.py set-target ${{ matrix.target }}
