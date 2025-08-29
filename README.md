@@ -1,4 +1,10 @@
 # ESP32 NTRIP Duo
+
+[![Build Test](https://github.com/danusha2345/esp32-ntrip-DUO_danusha/actions/workflows/build-test.yml/badge.svg)](https://github.com/danusha2345/esp32-ntrip-DUO_danusha/actions/workflows/build-test.yml)
+[![Build and Release](https://github.com/danusha2345/esp32-ntrip-DUO_danusha/actions/workflows/build-release.yml/badge.svg)](https://github.com/danusha2345/esp32-ntrip-DUO_danusha/actions/workflows/build-release.yml)
+[![GitHub release](https://img.shields.io/github/v/release/danusha2345/esp32-ntrip-DUO_danusha)](https://github.com/danusha2345/esp32-ntrip-DUO_danusha/releases)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
 This is modified version of ESP32 xbee.
 
 Main difference is that this have two NTRIP servers that can be running at the same time to be able to feed Onocoy and RTK Direct!!!
@@ -35,3 +41,52 @@ ESP32: gpio21 Red, gpio22 Green, gpio23 Blue
 
 ESP32S3: gpio4 Red, gpio5 Green, gpio6 Blue
 ![IMG_20250212_000825](https://github.com/user-attachments/assets/f17d28dc-4bc7-4647-8311-7a1c44526d17)
+
+## Quick Start
+
+### 📥 Download Pre-built Firmware
+1. Go to [Releases](https://github.com/danusha2345/esp32-ntrip-DUO_danusha/releases)
+2. Download the appropriate firmware for your ESP32 variant:
+   - `esp32-ntrip-duo-esp32-*.tar.gz` for ESP32
+   - `esp32-ntrip-duo-esp32s3-*.tar.gz` for ESP32-S3  
+   - `esp32-ntrip-duo-esp32c6-*.tar.gz` for ESP32-C6
+3. Extract and follow the included README for flashing instructions
+
+### 🔧 Build from Source
+```bash
+git clone https://github.com/danusha2345/esp32-ntrip-DUO_danusha.git
+cd esp32-ntrip-DUO_danusha
+git submodule update --init --recursive
+
+# Setup ESP-IDF (if not already done)
+. $HOME/esp/esp-idf/export.sh
+
+# Build for your target
+idf.py set-target esp32     # or esp32s3, esp32c6
+idf.py build
+idf.py flash
+```
+
+### 🌐 First Time Configuration
+1. Connect to **ESP32_NTRIP** WiFi network (password: `12345678`)
+2. Open browser and navigate to http://192.168.4.1
+3. Configure your WiFi network and NTRIP settings
+4. Connect your GNSS receiver to the configured UART pins
+
+## 🔌 Hardware Setup
+
+### Supported Boards
+- **ESP32**: Original ESP32 development boards
+- **ESP32-C3**: ESP32-C3 with RISC-V core and USB JTAG
+- **ESP32-S3**: ESP32-S3 based boards with enhanced GPIO
+- **ESP32-C6**: Latest ESP32-C6 with WiFi 6 support
+
+### Pin Connections
+See [PIN_MAPPING.md](docs/PIN_MAPPING.md) for detailed GPIO assignments.
+
+**Basic Connection:**
+- Connect GNSS TX to ESP32 RX pin
+- Connect GNSS RX to ESP32 TX pin  
+- Connect GND to GND
+- Optional: Status LEDs on configured GPIO pins
+- Optional: SD card for data logging
