@@ -1,6 +1,14 @@
 /*
- * This file is part of the ESP32-XBee distribution (https://github.com/nebkat/esp32-xbee).
+ * ESP32 NTRIP Duo - Модуль обработки UART
+ * Основан на ESP32-XBee (https://github.com/nebkat/esp32-xbee)
  * Copyright (c) 2019 Nebojsa Cvetkovic.
+ *
+ * Обеспечивает обмен данными через UART для ESP32 NTRIP Duo:
+ * - Получение RTK данных от базовой станции GNSS
+ * - Отправка NMEA сообщений о состоянии системы
+ * - Обработка системы событий чтения/записи
+ * - Конфигурируемые параметры порта (скорость, пины, протокол)
+ * - Статистика передачи данных
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -27,23 +35,30 @@
 #include "config.h"
 #include "tasks.h"
 
-static const char *TAG = "UART";
+static const char *TAG = "UART";                   // Тег для логирования UART модуля
 
-ESP_EVENT_DEFINE_BASE(UART_EVENT_READ);
-ESP_EVENT_DEFINE_BASE(UART_EVENT_WRITE);
+// Определение баз событий для UART операций
+ESP_EVENT_DEFINE_BASE(UART_EVENT_READ);            // События чтения данных с UART
+ESP_EVENT_DEFINE_BASE(UART_EVENT_WRITE);           // События записи данных в UART
 
+/// Регистрация обработчика событий чтения UART
+/// @param event_handler Функция-обработчик, вызываемая при получении данных
 void uart_register_read_handler(esp_event_handler_t event_handler) {
     ESP_ERROR_CHECK(esp_event_handler_register(UART_EVENT_READ, ESP_EVENT_ANY_ID, event_handler, NULL));
 }
 
+/// Отмена регистрации обработчика событий чтения UART
 void uart_unregister_read_handler(esp_event_handler_t event_handler) {
     ESP_ERROR_CHECK(esp_event_handler_unregister(UART_EVENT_READ, ESP_EVENT_ANY_ID, event_handler));
 }
 
+/// Регистрация обработчика событий записи UART
+/// @param event_handler Функция-обработчик, вызываемая при отправке данных
 void uart_register_write_handler(esp_event_handler_t event_handler) {
     ESP_ERROR_CHECK(esp_event_handler_register(UART_EVENT_WRITE, ESP_EVENT_ANY_ID, event_handler, NULL));
 }
 
+/// Отмена регистрации обработчика событий записи UART
 void uart_unregister_write_handler(esp_event_handler_t event_handler) {
     ESP_ERROR_CHECK(esp_event_handler_unregister(UART_EVENT_WRITE, ESP_EVENT_ANY_ID, event_handler));
 }

@@ -1,6 +1,16 @@
 /*
- * This file is part of the ESP32-XBee distribution (https://github.com/nebkat/esp32-xbee).
+ * ESP32 NTRIP Duo - Модуль управления конфигурацией
+ * Основан на ESP32-XBee (https://github.com/nebkat/esp32-xbee)
  * Copyright (c) 2019 Nebojsa Cvetkovic.
+ *
+ * Реализует систему хранения и управления конфигурацией устройства:
+ * - Параметры WiFi (SSID, пароль, AP режим)
+ * - Настройки NTRIP серверов (хост, порт, mountpoint, пароли)
+ * - Конфигурацию UART (скорость, пины, протокол)
+ * - Настройки светодиодов и дополнительных сервисов
+ * - Базовые значения по умолчанию для различных чипов ESP32
+ *
+ * Использует NVS (Non-Volatile Storage) для постоянного хранения настроек.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -27,138 +37,142 @@
 #include "config.h"
 #include <esp_netif.h>
 
-// GPIO pin definitions based on chip type
+// Определения GPIO пинов UART по умолчанию для различных типов чипов ESP32
 #ifdef CONFIG_IDF_TARGET_ESP32
-#define DEFAULT_UART_TX_PIN GPIO_NUM_1
-#define DEFAULT_UART_RX_PIN GPIO_NUM_3
-#define DEFAULT_UART_RTS_PIN GPIO_NUM_14
-#define DEFAULT_UART_CTS_PIN GPIO_NUM_33
+#define DEFAULT_UART_TX_PIN GPIO_NUM_1      // Стандартный ESP32: TX - GPIO1
+#define DEFAULT_UART_RX_PIN GPIO_NUM_3      // Стандартный ESP32: RX - GPIO3
+#define DEFAULT_UART_RTS_PIN GPIO_NUM_14    // Стандартный ESP32: RTS - GPIO14
+#define DEFAULT_UART_CTS_PIN GPIO_NUM_33    // Стандартный ESP32: CTS - GPIO33
 #elif defined(CONFIG_IDF_TARGET_ESP32C3)
-#define DEFAULT_UART_TX_PIN GPIO_NUM_21
-#define DEFAULT_UART_RX_PIN GPIO_NUM_20
-#define DEFAULT_UART_RTS_PIN GPIO_NUM_5
-#define DEFAULT_UART_CTS_PIN GPIO_NUM_6
+#define DEFAULT_UART_TX_PIN GPIO_NUM_21     // ESP32-C3: TX - GPIO21
+#define DEFAULT_UART_RX_PIN GPIO_NUM_20     // ESP32-C3: RX - GPIO20
+#define DEFAULT_UART_RTS_PIN GPIO_NUM_5     // ESP32-C3: RTS - GPIO5
+#define DEFAULT_UART_CTS_PIN GPIO_NUM_6     // ESP32-C3: CTS - GPIO6
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
-#define DEFAULT_UART_TX_PIN GPIO_NUM_43
-#define DEFAULT_UART_RX_PIN GPIO_NUM_44
-#define DEFAULT_UART_RTS_PIN GPIO_NUM_16
-#define DEFAULT_UART_CTS_PIN GPIO_NUM_15
+#define DEFAULT_UART_TX_PIN GPIO_NUM_43     // ESP32-S3: TX - GPIO43
+#define DEFAULT_UART_RX_PIN GPIO_NUM_44     // ESP32-S3: RX - GPIO44
+#define DEFAULT_UART_RTS_PIN GPIO_NUM_16    // ESP32-S3: RTS - GPIO16
+#define DEFAULT_UART_CTS_PIN GPIO_NUM_15    // ESP32-S3: CTS - GPIO15
 #elif defined(CONFIG_IDF_TARGET_ESP32C6)
-#define DEFAULT_UART_TX_PIN GPIO_NUM_16
-#define DEFAULT_UART_RX_PIN GPIO_NUM_17
-#define DEFAULT_UART_RTS_PIN GPIO_NUM_4
-#define DEFAULT_UART_CTS_PIN GPIO_NUM_5
+#define DEFAULT_UART_TX_PIN GPIO_NUM_16     // ESP32-C6: TX - GPIO16
+#define DEFAULT_UART_RX_PIN GPIO_NUM_17     // ESP32-C6: RX - GPIO17
+#define DEFAULT_UART_RTS_PIN GPIO_NUM_4     // ESP32-C6: RTS - GPIO4
+#define DEFAULT_UART_CTS_PIN GPIO_NUM_5     // ESP32-C6: CTS - GPIO5
 #else
-// Default fallback for other chips
+// Значения по умолчанию для неподдерживаемых чипов
 #define DEFAULT_UART_TX_PIN GPIO_NUM_1
 #define DEFAULT_UART_RX_PIN GPIO_NUM_3
 #define DEFAULT_UART_RTS_PIN GPIO_NUM_14
 #define DEFAULT_UART_CTS_PIN GPIO_NUM_33
 #endif
 
-static const char *TAG = "CONFIG";
-static const char *STORAGE = "config";
+static const char *TAG = "CONFIG";          // Тег для логирования модуля конфигурации
+static const char *STORAGE = "config";      // Имя пространства NVS для хранения конфигурации
 
-nvs_handle_t config_handle;
+nvs_handle_t config_handle;                     // Дескриптор хранилища NVS для работы с конфигурацией
 
+/// Таблица элементов конфигурации ESP32 NTRIP Duo
+/// Содержит все настройки устройства с их типами данных и значениями по умолчанию
+/// Каждый элемент включает ключ, тип данных, значение по умолчанию и флаг секретности
 const config_item_t CONFIG_ITEMS[] = {
-        // Admin
+        // ==================== Параметры администратора ====================
         {
-                .key = KEY_CONFIG_ADMIN_AUTH,
+                .key = KEY_CONFIG_ADMIN_AUTH,               // Тип авторизации администратора
                 .type = CONFIG_ITEM_TYPE_INT8,
-                .def.int8 = 0
+                .def.int8 = 0                               // 0 = без авторизации
         },
         {
-                .key = KEY_CONFIG_ADMIN_USERNAME,
+                .key = KEY_CONFIG_ADMIN_USERNAME,           // Имя пользователя администратора
                 .type = CONFIG_ITEM_TYPE_STRING,
-                .def.str = ""
+                .def.str = ""                               // Пустое по умолчанию
         }, {
-                .key = KEY_CONFIG_ADMIN_PASSWORD,
+                .key = KEY_CONFIG_ADMIN_PASSWORD,           // Пароль администратора  
                 .type = CONFIG_ITEM_TYPE_STRING,
-                .secret = true,
-                .def.str = ""
+                .secret = true,                             // Секретное поле - не показывать в веб-интерфейсе
+                .def.str = ""                               // Пустой по умолчанию
         },
 
-        // Bluetooth
+        // ==================== Параметры Bluetooth ====================
         {
-                .key = KEY_CONFIG_BLUETOOTH_ACTIVE,
+                .key = KEY_CONFIG_BLUETOOTH_ACTIVE,         // Включить/выключить Bluetooth
                 .type = CONFIG_ITEM_TYPE_BOOL,
-                .def.bool1 = false
+                .def.bool1 = false                          // По умолчанию отключен
         }, {
-                .key = KEY_CONFIG_BLUETOOTH_DEVICE_NAME,
+                .key = KEY_CONFIG_BLUETOOTH_DEVICE_NAME,    // Имя Bluetooth устройства
                 .type = CONFIG_ITEM_TYPE_STRING,
-                .def.str = ""
+                .def.str = ""                               // Пустое по умолчанию
         }, {
-                .key = KEY_CONFIG_BLUETOOTH_DEVICE_DISCOVERABLE,
+                .key = KEY_CONFIG_BLUETOOTH_DEVICE_DISCOVERABLE, // Видимость Bluetooth устройства
                 .type = CONFIG_ITEM_TYPE_BOOL,
-                .def.bool1 = true
+                .def.bool1 = true                           // По умолчанию видимое
         }, {
-                .key = KEY_CONFIG_BLUETOOTH_PIN_CODE,
+                .key = KEY_CONFIG_BLUETOOTH_PIN_CODE,       // PIN-код для сопряжения
                 .type = CONFIG_ITEM_TYPE_UINT16,
-                .secret = true,
-                .def.uint16 = 1234
+                .secret = true,                             // Секретное поле
+                .def.uint16 = 1234                          // Стандартный PIN по умолчанию
         },
 
-        // NTRIP
+        // ==================== ПЕРВИЧНЫЙ NTRIP СЕРВЕР ====================
         {
-                .key = KEY_CONFIG_NTRIP_SERVER_ACTIVE,
+                .key = KEY_CONFIG_NTRIP_SERVER_ACTIVE,      // Включить/выключить первичный NTRIP сервер
                 .type = CONFIG_ITEM_TYPE_BOOL,
-                .def.bool1 = false
+                .def.bool1 = false                          // По умолчанию отключен
         }, {
-                .key = KEY_CONFIG_NTRIP_SERVER_COLOR,
+                .key = KEY_CONFIG_NTRIP_SERVER_COLOR,       // Цвет статусного светодиода первичного сервера
                 .type = CONFIG_ITEM_TYPE_COLOR,
-                .def.color.rgba = 0x00000055u
+                .def.color.rgba = 0x00000055u               // Тёмно-синий с прозрачностью
         }, {
-                .key = KEY_CONFIG_NTRIP_SERVER_HOST,
+                .key = KEY_CONFIG_NTRIP_SERVER_HOST,        // Адрес NTRIP кастера (например, rtk.onocoy.com)
                 .type = CONFIG_ITEM_TYPE_STRING,
-                .def.str = ""
+                .def.str = ""                               // Пустой по умолчанию - должен быть настроен
         }, {
-                .key = KEY_CONFIG_NTRIP_SERVER_PORT,
+                .key = KEY_CONFIG_NTRIP_SERVER_PORT,        // Порт NTRIP кастера
                 .type = CONFIG_ITEM_TYPE_UINT16,
-                .def.uint16 = 2101
+                .def.uint16 = 2101                          // Стандартный порт NTRIP
         }, {
-                .key = KEY_CONFIG_NTRIP_SERVER_MOUNTPOINT,
+                .key = KEY_CONFIG_NTRIP_SERVER_MOUNTPOINT,  // Точка подключения (mountpoint) на кастере
                 .type = CONFIG_ITEM_TYPE_STRING,
-                .def.str = ""
+                .def.str = ""                               // Пустая по умолчанию - должна быть настроена
         }, {
-                .key = KEY_CONFIG_NTRIP_SERVER_USERNAME,
+                .key = KEY_CONFIG_NTRIP_SERVER_USERNAME,    // Имя пользователя для аутентификации на кастере
                 .type = CONFIG_ITEM_TYPE_STRING,
-                .def.str = ""
+                .def.str = ""                               // Пустое по умолчанию
         }, {
-                .key = KEY_CONFIG_NTRIP_SERVER_PASSWORD,
+                .key = KEY_CONFIG_NTRIP_SERVER_PASSWORD,    // Пароль для аутентификации на кастере
                 .type = CONFIG_ITEM_TYPE_STRING,
-                .secret = true,
-                .def.str = ""
+                .secret = true,                             // Секретное поле
+                .def.str = ""                               // Пустой по умолчанию
         },
 
+        // ==================== ВТОРИЧНЫЙ NTRIP СЕРВЕР ====================
         {
-                .key = KEY_CONFIG_NTRIP_SERVER_2_ACTIVE,
+                .key = KEY_CONFIG_NTRIP_SERVER_2_ACTIVE,    // Включить/выключить вторичный NTRIP сервер
                 .type = CONFIG_ITEM_TYPE_BOOL,
-                .def.bool1 = false
+                .def.bool1 = false                          // По умолчанию отключен
         }, {
-                .key = KEY_CONFIG_NTRIP_SERVER_2_COLOR,
+                .key = KEY_CONFIG_NTRIP_SERVER_2_COLOR,     // Цвет статусного светодиода вторичного сервера
                 .type = CONFIG_ITEM_TYPE_COLOR,
-                .def.color.rgba = 0x00000055u
+                .def.color.rgba = 0x00000055u               // Тёмно-синий с прозрачностью
         }, {
-                .key = KEY_CONFIG_NTRIP_SERVER_2_HOST,
+                .key = KEY_CONFIG_NTRIP_SERVER_2_HOST,      // Адрес второго NTRIP кастера
                 .type = CONFIG_ITEM_TYPE_STRING,
-                .def.str = ""
+                .def.str = ""                               // Пустой по умолчанию
         }, {
-                .key = KEY_CONFIG_NTRIP_SERVER_2_PORT,
+                .key = KEY_CONFIG_NTRIP_SERVER_2_PORT,      // Порт второго NTRIP кастера
                 .type = CONFIG_ITEM_TYPE_UINT16,
-                .def.uint16 = 2101
+                .def.uint16 = 2101                          // Стандартный порт NTRIP
         }, {
-                .key = KEY_CONFIG_NTRIP_SERVER_2_MOUNTPOINT,
+                .key = KEY_CONFIG_NTRIP_SERVER_2_MOUNTPOINT, // Точка подключения на втором кастере
                 .type = CONFIG_ITEM_TYPE_STRING,
-                .def.str = ""
+                .def.str = ""                               // Пустая по умолчанию
         }, {
-                .key = KEY_CONFIG_NTRIP_SERVER_2_USERNAME,
+                .key = KEY_CONFIG_NTRIP_SERVER_2_USERNAME,  // Имя пользователя для второго кастера
                 .type = CONFIG_ITEM_TYPE_STRING,
-                .def.str = ""
+                .def.str = ""                               // Пустое по умолчанию
         }, {
-                .key = KEY_CONFIG_NTRIP_SERVER_2_PASSWORD,
+                .key = KEY_CONFIG_NTRIP_SERVER_2_PASSWORD,  // Пароль для второго кастера
                 .type = CONFIG_ITEM_TYPE_STRING,
-                .secret = true,
+                .secret = true,                             // Секретное поле
                 .def.str = ""
         },
 
@@ -456,35 +470,49 @@ esp_err_t config_set_blob(const char *key, char *value, size_t length) {
     return nvs_set_blob(config_handle, key, value, length);
 }
 
+/// Инициализация модуля конфигурации
+/// Инициализирует NVS (Non-Volatile Storage) для хранения настроек устройства
+/// @return ESP_OK при успешной инициализации, код ошибки в противном случае
 esp_err_t config_init() {
+    // Инициализация флэш-памяти NVS
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        // NVS partition was truncated and needs to be erased
-        // Retry nvs_flash_init
+        // NVS раздел повреждён или устарел - очистка и повторная инициализация
         ESP_ERROR_CHECK(nvs_flash_erase());
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
 
+    // Открытие дескриптора NVS для пространства конфигурации
     ESP_LOGD(TAG, "Opening Non-Volatile Storage (NVS) handle '%s'... ", STORAGE);
     return nvs_open(STORAGE, NVS_READWRITE, &config_handle);
 }
 
+/// Сброс конфигурации к заводским настройкам
+/// Удаляет все сохранённые настройки из NVS, после чего будут использоваться значения по умолчанию
+/// Вызывается при длительном удержании кнопки сброса на устройстве
+/// @return ESP_OK при успешном сбросе, код ошибки в противном случае  
 esp_err_t config_reset() {
-    uart_nmea("$PESP,CFG,RESET");
+    uart_nmea("$PESP,CFG,RESET");                   // NMEA сообщение о сбросе конфигурации
 
-    return nvs_erase_all(config_handle);
+    return nvs_erase_all(config_handle);            // Полная очистка пространства конфигурации
 }
 
+/// Получение 8-битного целого значения из конфигурации
+/// @param item Указатель на элемент конфигурации
+/// @return Значение из NVS или значение по умолчанию, если ключ не найден
 int8_t config_get_i8(const config_item_t *item) {
-    int8_t value = item->def.int8;
-    nvs_get_i8(config_handle, item->key, &value);
+    int8_t value = item->def.int8;                  // Загрузка значения по умолчанию
+    nvs_get_i8(config_handle, item->key, &value);  // Попытка чтения из NVS (если не найдено, value не изменится)
     return value;
 }
 
+/// Получение 16-битного целого значения из конфигурации
+/// @param item Указатель на элемент конфигурации
+/// @return Значение из NVS или значение по умолчанию
 int16_t config_get_i16(const config_item_t *item) {
-    int16_t value = item->def.int16;
-    nvs_get_i16(config_handle, item->key, &value);
+    int16_t value = item->def.int16;                // Загрузка значения по умолчанию
+    nvs_get_i16(config_handle, item->key, &value); // Попытка чтения из NVS
     return value;
 }
 

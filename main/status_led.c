@@ -1,6 +1,15 @@
 /*
- * This file is part of the ESP32-XBee distribution (https://github.com/nebkat/esp32-xbee).
+ * ESP32 NTRIP Duo - Модуль управления статусными светодиодами
+ * Основан на ESP32-XBee (https://github.com/nebkat/esp32-xbee)
  * Copyright (c) 2019 Nebojsa Cvetkovic.
+ *
+ * Реализует систему многоцветных статусных светодиодов для ESP32 NTRIP Duo:
+ * - RGB светодиоды для индикации состояния различных сервисов
+ * - Различные режимы работы: мигание, затухание, постоянное свечение  
+ * - Поддержка нескольких независимых светодиодов одновременно
+ * - Аппаратный ШИМ (LEDC) для плавного управления яркостью
+ * - Настраиваемые пины для разных типов чипов ESP32
+ * - Приоритезация светодиодов при наложении эффектов
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -29,15 +38,16 @@
 #include "status_led.h"
 #include <sys/queue.h>
 
+// Выбор скоростного режима LEDC в зависимости от типа чипа
 #if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32C6)
-#define LEDC_SPEED_MODE LEDC_LOW_SPEED_MODE
+#define LEDC_SPEED_MODE LEDC_LOW_SPEED_MODE   // Новые чипы используют только низкоскоростной режим
 #else
-#define LEDC_SPEED_MODE LEDC_HIGH_SPEED_MODE
+#define LEDC_SPEED_MODE LEDC_HIGH_SPEED_MODE  // Классический ESP32 поддерживает высокоскоростной режим
 #endif
 
-// GPIO pin definitions based on chip type
+// Определения GPIO пинов для RGB светодиодов в зависимости от типа чипа ESP32
 #ifdef CONFIG_IDF_TARGET_ESP32
-#define STATUS_LED_RED_GPIO GPIO_NUM_21
+#define STATUS_LED_RED_GPIO GPIO_NUM_21       // ESP32: красный канал - GPIO21
 #define STATUS_LED_GREEN_GPIO GPIO_NUM_22
 #define STATUS_LED_BLUE_GPIO GPIO_NUM_23
 #elif defined(CONFIG_IDF_TARGET_ESP32C3)

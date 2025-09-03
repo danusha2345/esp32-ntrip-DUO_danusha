@@ -1,6 +1,16 @@
 /*
- * This file is part of the ESP32-XBee distribution (https://github.com/nebkat/esp32-xbee).
+ * ESP32 NTRIP Duo - Модуль управления WiFi
+ * Основан на ESP32-XBee (https://github.com/nebkat/esp32-xbee)
  * Copyright (c) 2019 Nebojsa Cvetkovic.
+ *
+ * Реализует функциональность WiFi для ESP32 NTRIP Duo:
+ * - Режим Station (STA) - подключение к существующей WiFi сети
+ * - Режим Access Point (AP) - создание собственной WiFi точки доступа
+ * - Одновременная работа в обоих режимах (STA+AP)
+ * - Автоматическое переподключение при потере соединения
+ * - Статусные светодиоды для индикации состояния подключения
+ * - mDNS служба для обнаружения устройства в сети
+ * - Управление IP конфигурацией (статический/DHCP)
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -33,33 +43,39 @@
 #include "config.h"
 #include "rom/ets_sys.h"
 
-static const char *TAG = "WIFI";
+static const char *TAG = "WIFI";                    // Тег для логирования WiFi модуля
 
+// Группа событий для синхронизации между задачами WiFi
 static EventGroupHandle_t wifi_event_group;
-const int WIFI_STA_GOT_IPV4_BIT = BIT0;
-const int WIFI_STA_GOT_IPV6_BIT = BIT1;
-const int WIFI_AP_STA_CONNECTED_BIT = BIT2;
+const int WIFI_STA_GOT_IPV4_BIT = BIT0;             // Station получил IPv4 адрес
+const int WIFI_STA_GOT_IPV6_BIT = BIT1;             // Station получил IPv6 адрес
+const int WIFI_AP_STA_CONNECTED_BIT = BIT2;         // К Access Point подключился клиент
 
-static TaskHandle_t sta_status_task = NULL;
-static TaskHandle_t sta_reconnect_task = NULL;
+// Дескрипторы задач WiFi
+static TaskHandle_t sta_status_task = NULL;         // Задача отслеживания статуса STA подключения
+static TaskHandle_t sta_reconnect_task = NULL;      // Задача автоматического переподключения STA
 
-static status_led_handle_t status_led_ap;
-static status_led_handle_t status_led_sta;
+// Дескрипторы статусных светодиодов
+static status_led_handle_t status_led_ap;           // Светодиод статуса Access Point
+static status_led_handle_t status_led_sta;          // Светодиод статуса Station
 
-static wifi_config_t config_ap;
-static wifi_config_t config_sta;
+// Конфигурации WiFi для разных режимов
+static wifi_config_t config_ap;                     // Конфигурация Access Point режима
+static wifi_config_t config_sta;                    // Конфигурация Station режима
 
-static retry_delay_handle_t delay_handle;
+static retry_delay_handle_t delay_handle;           // Дескриптор для управления задержками переподключений
 
-static bool ap_active = false;
-static bool sta_active = false;
+// Флаги активности WiFi режимов
+static bool ap_active = false;                      // Access Point активен
+static bool sta_active = false;                     // Station активен
 
-static bool sta_connected;
-static wifi_ap_record_t sta_ap_info;
-static wifi_sta_list_t ap_sta_list;
+// Информация о текущих подключениях
+static bool sta_connected;                          // STA подключен к внешней сети
+static wifi_ap_record_t sta_ap_info;                // Информация о внешней точке доступа (к которой подключён STA)
+static wifi_sta_list_t ap_sta_list;                 // Список клиентов, подключённых к нашему AP
 
-static esp_netif_t *esp_netif_ap;
-static esp_netif_t *esp_netif_sta;
+static esp_netif_t *esp_netif_ap;                   // Сетевой интерфейс для Access Point режима
+static esp_netif_t *esp_netif_sta;                  // Сетевой интерфейс для Station режима
 
 static void wifi_sta_status_task(void *ctx) {
     uint8_t rssi_duty = 0;
@@ -240,22 +256,32 @@ static void handle_ap_sta_ip_assigned(void *esp_netif, esp_event_base_t base, in
     uart_nmea("$PESP,WIFI,AP,STA_IP_ASSIGNED," IPSTR, IP2STR(&event->ip));
 }
 
+/// Ожидание получения IP адреса в Station режиме
+/// Блокирует выполнение до тех пор, пока STA не получит IPv4 адрес
 void wait_for_ip() {
     xEventGroupWaitBits(wifi_event_group, WIFI_STA_GOT_IPV4_BIT, false, false, portMAX_DELAY);
 }
 
+/// Ожидание доступности сети (любого вида подключения)
+/// Ожидает либо STA подключения к сети, либо подключения клиента к нашему AP
 void wait_for_network() {
     xEventGroupWaitBits(wifi_event_group, WIFI_STA_GOT_IPV4_BIT | WIFI_AP_STA_CONNECTED_BIT, false, false, portMAX_DELAY);
 }
 
+/// Инициализация WiFi подсистемы ESP32 NTRIP Duo
+/// Настраивает оба режима WiFi (Station и Access Point) в соответствии с конфигурацией
+/// Создаёт задачи мониторинга состояния и переподключения
 void wifi_init() {
+    // Создание группы событий для синхронизации между WiFi задачами
     wifi_event_group = xEventGroupCreate();
+    
+    // Инициализация WiFi драйвера с настройками по умолчанию
     wifi_init_config_t wifi_init_config = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&wifi_init_config));
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
+    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));  // Хранение конфигурации в RAM (не во флэш)
 
-    // Reconnect delay timer
-    delay_handle = retry_init(true, 5, 2000, 60000);
+    // Инициализация механизма переподключения с экспоненциальной задержкой
+    delay_handle = retry_init(true, 5, 2000, 60000);  // Макс 5 попыток, старт 2с, макс 60с
 
     // SoftAP
     bool ap_enable = config_get_bool1(CONF_ITEM(KEY_CONFIG_WIFI_AP_ACTIVE));

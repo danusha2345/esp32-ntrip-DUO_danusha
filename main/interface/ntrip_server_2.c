@@ -1,6 +1,16 @@
 /*
- * This file is part of the ESP32-XBee distribution (https://github.com/nebkat/esp32-xbee).
+ * ESP32 NTRIP Duo - Вторичный NTRIP сервер
+ * Основан на ESP32-XBee (https://github.com/nebkat/esp32-xbee)
  * Copyright (c) 2019 Nebojsa Cvetkovic.
+ *
+ * Второй клиент NTRIP протокола для одновременной передачи RTK коррекций
+ * на два независимых NTRIP кастера (например, Onocoy и RTK Direct).
+ * 
+ * Особенности вторичного сервера:
+ * - Независимое подключение к другому кастеру
+ * - Отдельная конфигурация (хост, порт, mountpoint, пароль)
+ * - Отдельный статусный светодиод и статистика
+ * - Общие данные от UART (оба сервера получают одинаковые данные)
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -31,57 +41,66 @@
 #include "util.h"
 #include "uart.h"
 
-static const char *TAG = "NTRIP_SERVER";
+static const char *TAG = "NTRIP_SERVER_2";       // Тег для логирования вторичного NTRIP сервера
 
-#define BUFFER_SIZE 512
+#define BUFFER_SIZE 512                             // Размер буфера для сетевых операций (байт)
 
-static const int CASTER_READY_BIT = BIT0;
-static const int DATA_READY_BIT = BIT1;
-static const int DATA_SENT_BIT = BIT2;
+// Биты состояния для синхронизации между задачами
+static const int CASTER_READY_BIT = BIT0;           // Кастер готов принимать данные
+static const int DATA_READY_BIT = BIT1;             // Данные доступны от UART
+static const int DATA_SENT_BIT = BIT2;              // Данные были отправлены хотя бы раз
 
-static int sock = -1;
+static int sock = -1;                               // Сокет соединения с вторым NTRIP кастером
 
-static int data_keep_alive;
-static EventGroupHandle_t server_event_group;
+static int data_keep_alive;                         // Счётчик времени без данных (мс)
+static EventGroupHandle_t server_event_group;       // Группа событий для синхронизации
 
-static status_led_handle_t status_led = NULL;
-static stream_stats_handle_t stream_stats = NULL;
+static status_led_handle_t status_led = NULL;       // Дескриптор статусного светодиода второго сервера
+static stream_stats_handle_t stream_stats = NULL;   // Дескриптор статистики потока второго сервера
 
-static TaskHandle_t server_task = NULL;
-static TaskHandle_t sleep_task = NULL;
+static TaskHandle_t server_task = NULL;             // Дескриптор основной задачи второго сервера
+static TaskHandle_t sleep_task = NULL;              // Дескриптор задачи контроля keep-alive второго сервера
 
+/// Обработчик данных от UART для вторичного NTRIP сервера
+/// Аналогичен первичному серверу, но отправляет на второй кастер
+/// Оба сервера получают одинаковые RTK данные от одного UART
 static void ntrip_server_uart_handler(void* handler_args, esp_event_base_t base, int32_t length, void* buffer) {
     EventBits_t event_bits = xEventGroupGetBits(server_event_group);
 
-    // Reset data availability bit
+    // Установка флага готовности данных при первом поступлении
     if ((event_bits & DATA_READY_BIT) == 0) {
         xEventGroupSetBits(server_event_group, DATA_READY_BIT);
 
         if (event_bits & DATA_SENT_BIT)
             ESP_LOGI(TAG, "Data received by UART, will now reconnect to caster if disconnected");
     }
-    data_keep_alive = 0;
+    data_keep_alive = 0;                                // Сброс счётчика keep-alive
 
-    // Ignore if caster is not connected and ready for data
+    // Игнорирование данных если второй кастер не готов
     if ((event_bits & CASTER_READY_BIT) == 0) return;
 
-    // Caster is connected and some data will be sent
+    // Установка флага успешной отправки при первой передаче
     if ((event_bits & DATA_SENT_BIT) == 0) xEventGroupSetBits(server_event_group, DATA_SENT_BIT);
 
+    // Отправка RTK данных во второй NTRIP кастер
     int sent = write(sock, buffer, length);
     if (sent < 0) {
+        // При ошибке - закрытие сокета и переподключение
         destroy_socket(&sock);
         vTaskResume(server_task);
     } else {
+        // Обновление статистики для второго сервера
         stream_stats_increment(stream_stats, 0, sent);
     }
 }
 
+/// Задача контроля keep-alive для вторичного NTRIP сервера
+/// Независимо от первичного сервера контролирует время жизни соединения
 static void ntrip_server_sleep_task(void *ctx) {
-    vTaskSuspend(NULL);
+    vTaskSuspend(NULL);                                 // Начальная приостановка до активации
 
     while (true) {
-        // If wait time exceeded, clear data ready bit
+        // Проверка превышения времени ожидания данных от UART
         if (data_keep_alive == NTRIP_KEEP_ALIVE_THRESHOLD) {
             xEventGroupClearBits(server_event_group, DATA_READY_BIT);
             ESP_LOGW(TAG, "No data received by UART in %d seconds, will not reconnect to caster if disconnected", NTRIP_KEEP_ALIVE_THRESHOLD / 1000);
@@ -91,35 +110,45 @@ static void ntrip_server_sleep_task(void *ctx) {
     }
 }
 
+/// Основная задача вторичного NTRIP сервера
+/// Полностью независима от первичного сервера, использует отдельную конфигурацию
+/// Подключается ко второму кастеру с собственными параметрами подключения
 static void ntrip_server_task(void *ctx) {
+    // Инициализация независимой группы событий для второго сервера
     server_event_group = xEventGroupCreate();
+    // Регистрация обработчика UART (оба сервера получают одинаковые данные)
     uart_register_read_handler(ntrip_server_uart_handler);
+    // Создание независимой задачи keep-alive для второго сервера
     xTaskCreate(ntrip_server_sleep_task, "ntrip_server_sleep_task", 2048, NULL, TASK_PRIORITY_INTERFACE, &sleep_task);
 
+    // Настройка отдельного статусного светодиода для второго сервера
     config_color_t status_led_color = config_get_color(CONF_ITEM(KEY_CONFIG_NTRIP_SERVER_2_COLOR));
     if (status_led_color.rgba != 0) status_led = status_led_add(status_led_color.rgba, STATUS_LED_FADE, 500, 2000, 0);
     if (status_led != NULL) status_led->active = false;
 
-    stream_stats = stream_stats_new("ntrip_server");
+    // Создание отдельной статистики для второго сервера
+    stream_stats = stream_stats_new("ntrip_server_2");
 
+    // Независимый механизм повторных подключений для второго сервера
     retry_delay_handle_t delay_handle = retry_init(true, 5, 2000, 0);
 
     while (true) {
         retry_delay(delay_handle);
 
-        // Wait for data to be available
+        /* Ожидание наличия данных от UART для второго сервера */
         if ((xEventGroupGetBits(server_event_group) & DATA_READY_BIT) == 0) {
             ESP_LOGI(TAG, "Waiting for UART input to connect to caster");
-            uart_nmea("$PESP,NTRIP,SRV2,WAITING");
+            uart_nmea("$PESP,NTRIP,SRV2,WAITING");        // NMEA сообщение для второго сервера
             xEventGroupWaitBits(server_event_group, DATA_READY_BIT, true, false, portMAX_DELAY);
         }
 
-        vTaskResume(sleep_task);
+        vTaskResume(sleep_task);                                // Активация keep-alive контроля
 
-        wait_for_ip();
+        wait_for_ip();                                          // Ожидание WiFi подключения
 
         char *buffer = NULL;
 
+        /* Загрузка отдельной конфигурации для второго NTRIP кастера */
         char *host, *mountpoint, *password;
         uint16_t port = config_get_u16(CONF_ITEM(KEY_CONFIG_NTRIP_SERVER_2_PORT));
         config_get_primitive(CONF_ITEM(KEY_CONFIG_NTRIP_SERVER_2_PORT), &port);
@@ -151,26 +180,27 @@ static void ntrip_server_task(void *ctx) {
                 "Could not connect to mountpoint: %s", status == NULL ? "HTTP response malformed" : status);
         free(status);
 
+        /* Успешное подключение ко второму кастеру */
         ESP_LOGI(TAG, "Successfully connected to %s:%d/%s", host, port, mountpoint);
-        uart_nmea("$PESP,NTRIP,SRV2,CONNECTED,%s:%d,%s", host, port, mountpoint);
+        uart_nmea("$PESP,NTRIP,SRV2,CONNECTED,%s:%d,%s", host, port, mountpoint);  // SRV2 для второго сервера
 
-        retry_reset(delay_handle);
+        retry_reset(delay_handle);                              // Сброс счётчика попыток
 
-        if (status_led != NULL) status_led->active = true;
+        if (status_led != NULL) status_led->active = true;     // Включение светодиода второго сервера
 
-        // Connected
+        /* Установка готовности второго кастера */
         xEventGroupSetBits(server_event_group, CASTER_READY_BIT);
 
-        // Await disconnect from UART handler
+        /* Приостановка до отключения */
         vTaskSuspend(NULL);
 
-        // Disconnected
+        /* Обработка отключения от второго кастера */
         xEventGroupClearBits(server_event_group, CASTER_READY_BIT | DATA_SENT_BIT);
 
-        if (status_led != NULL) status_led->active = false;
+        if (status_led != NULL) status_led->active = false;    // Отключение светодиода
 
         ESP_LOGW(TAG, "Disconnected from %s:%d/%s", host, port, mountpoint);
-        uart_nmea("$PESP,NTRIP,SRV2,DISCONNECTED,%s:%d,%s", host, port, mountpoint);
+        uart_nmea("$PESP,NTRIP,SRV2,DISCONNECTED,%s:%d,%s", host, port, mountpoint);  // SRV2 для второго сервера
 
         _error:
         vTaskSuspend(sleep_task);
@@ -184,8 +214,13 @@ static void ntrip_server_task(void *ctx) {
     }
 }
 
+/// Инициализация вторичного NTRIP сервера
+/// Создаёт независимую задачу сервера только если он активен в конфигурации
+/// Работает параллельно с первичным сервером, подключаясь ко второму кастеру
 void ntrip_server_2_init() {
+    // Проверка активности второго сервера в конфигурации NVS
     if (!config_get_bool1(CONF_ITEM(KEY_CONFIG_NTRIP_SERVER_2_ACTIVE))) return;
 
-    xTaskCreate(ntrip_server_task, "ntrip_server_task", 4096, NULL, TASK_PRIORITY_INTERFACE, &server_task);
+    // Создание задачи второго NTRIP сервера с тем же приоритетом что и у первого
+    xTaskCreate(ntrip_server_task, "ntrip_server_2_task", 4096, NULL, TASK_PRIORITY_INTERFACE, &server_task);
 }
