@@ -80,6 +80,7 @@ build_target() {
         # Find the main firmware files (project name varies by target)
         MAIN_BIN=$(find build/ -maxdepth 1 -name "$target-ntrip-duo.bin" -o -name "esp32-ntrip-duo.bin" | head -1)
         MAIN_ELF=$(find build/ -maxdepth 1 -name "$target-ntrip-duo.elf" -o -name "esp32-ntrip-duo.elf" | head -1)
+        MAIN_BIN_NAME=$(basename "$MAIN_BIN")
         
         if [ -n "$MAIN_BIN" ]; then
             cp "$MAIN_BIN" "$BUILD_DIR/$target/"
@@ -141,7 +142,7 @@ python -m esptool \\
     --flash_freq 40m \\
     0x1000 bootloader.bin \\
     0x8000 partition-table.bin \\
-    0x10000 esp32-xbee.bin \\
+    0x10000 $MAIN_BIN_NAME \\
     0x210000 www.bin
 
 echo "Flash complete! Connect to ESP32_NTRIP WiFi network (password: 12345678)"
@@ -174,7 +175,7 @@ python -m esptool ^
     --flash_freq 40m ^
     0x1000 bootloader.bin ^
     0x8000 partition-table.bin ^
-    0x10000 esp32-xbee.bin ^
+    0x10000 MAIN_BIN_NAME ^
     0x210000 www.bin
 
 echo Flash complete! Connect to ESP32_NTRIP WiFi network (password: 12345678)
@@ -182,8 +183,10 @@ echo Then navigate to http://192.168.4.1 to configure.
 pause
 EOF
         
-        # Replace TARGET_CHIP with actual target
+        # Replace TARGET_CHIP and MAIN_BIN_NAME with actual values
         sed -i "s/TARGET_CHIP/$target/g" "$BUILD_DIR/$target/flash.bat"
+        sed -i "s/MAIN_BIN_NAME/$MAIN_BIN_NAME/g" "$BUILD_DIR/$target/flash.bat"
+        sed -i "s/\$MAIN_BIN_NAME/$MAIN_BIN_NAME/g" "$BUILD_DIR/$target/flash.sh"
         
         # Generate README
         cat > "$BUILD_DIR/$target/README.md" << EOF
@@ -192,9 +195,9 @@ EOF
 ## Files
 - \`bootloader.bin\` - ESP32 bootloader
 - \`partition-table.bin\` - Partition table  
-- \`esp32-xbee.bin\` - Main application firmware
+- Main application firmware (.bin)
 - \`www.bin\` - Web interface files
-- \`esp32-xbee.elf\` - ELF file for debugging
+- ELF file for debugging (.elf)
 - \`flash.sh\` - Linux/Mac flash script
 - \`flash.bat\` - Windows flash script
 
@@ -281,7 +284,7 @@ flash.bat COM3 460800
 ### Manual (esptool.py)
 ```bash
 pip install esptool
-python -m esptool --chip TARGET --port PORT -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size detect --flash_freq 40m 0x1000 bootloader.bin 0x8000 partition-table.bin 0x10000 esp32-xbee.bin 0x210000 www.bin
+python -m esptool --chip TARGET --port PORT -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size detect --flash_freq 40m 0x1000 bootloader.bin 0x8000 partition-table.bin 0x10000 <firmware>.bin 0x210000 www.bin
 ```
 
 ## First Time Setup
@@ -306,10 +309,12 @@ EOF
         sed -i "s/TARGET/$target/g" "$BUILD_DIR/$target/README.md"
         
         # Get build size info
-        APP_SIZE=$(stat -f%z "build/esp32-xbee.bin" 2>/dev/null || stat -c%s "build/esp32-xbee.bin")
+        if [ -n "$MAIN_BIN" ] && [ -f "$MAIN_BIN" ]; then
+            APP_SIZE=$(stat -f%z "$MAIN_BIN" 2>/dev/null || stat -c%s "$MAIN_BIN")
+            echo -e "${GREEN}  Application size: $(($APP_SIZE / 1024)) KB${NC}"
+        fi
         BOOT_SIZE=$(stat -f%z "build/bootloader/bootloader.bin" 2>/dev/null || stat -c%s "build/bootloader/bootloader.bin")
         
-        echo -e "${GREEN}  Application size: $(($APP_SIZE / 1024)) KB${NC}"
         echo -e "${GREEN}  Bootloader size: $(($BOOT_SIZE / 1024)) KB${NC}"
         echo
         
