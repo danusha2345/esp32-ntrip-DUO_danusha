@@ -36,6 +36,7 @@
 #include <retry.h>
 #include <stream_stats.h>
 #include <freertos/event_groups.h>
+#include <freertos/semphr.h>
 #include <esp_ota_ops.h>
 #include "interface/ntrip.h"
 #include "config.h"
@@ -52,6 +53,7 @@ static const int DATA_READY_BIT = BIT1;             // Данные доступ
 static const int DATA_SENT_BIT = BIT2;              // Данные были отправлены хотя бы раз
 
 static int sock = -1;                               // Сокет соединения с NTRIP кастером
+static SemaphoreHandle_t sock_mutex = NULL;         // Мьютекс для защиты сокета от race conditions
 
 static int data_keep_alive;                         // Счётчик времени без данных (мс)
 static EventGroupHandle_t server_event_group;       // Группа событий для синхронизации
@@ -87,15 +89,23 @@ static void ntrip_server_uart_handler(void* handler_args, esp_event_base_t base,
     // Установка флага успешной отправки при первой передаче
     if ((event_bits & DATA_SENT_BIT) == 0) xEventGroupSetBits(server_event_group, DATA_SENT_BIT);
 
-    // Отправка RTK данных в сокет NTRIP кастера
-    int sent = write(sock, buffer, length);
-    if (sent < 0) {
-        // При ошибке отправки - закрытие сокета и перезапуск соединения
-        destroy_socket(&sock);
-        vTaskResume(server_task);                       // Пробуждение основной задачи для переподключения
-    } else {
-        // Обновление статистики переданных данных
-        stream_stats_increment(stream_stats, 0, sent);
+    // Защита сокета мьютексом от одновременного доступа
+    if (xSemaphoreTake(sock_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        if (sock >= 0) {
+            // Отправка RTK данных в сокет NTRIP кастера
+            int sent = write(sock, buffer, length);
+            if (sent < 0) {
+                // При ошибке отправки - закрытие сокета и перезапуск соединения
+                destroy_socket(&sock);
+                xSemaphoreGive(sock_mutex);
+                vTaskResume(server_task);                   // Пробуждение основной задачи для переподключения
+                return;
+            } else {
+                // Обновление статистики переданных данных
+                stream_stats_increment(stream_stats, 0, sent);
+            }
+        }
+        xSemaphoreGive(sock_mutex);
     }
 }
 
@@ -124,6 +134,13 @@ static void ntrip_server_sleep_task(void *ctx) {
 static void ntrip_server_task(void *ctx) {
     // Инициализация группы событий для синхронизации
     server_event_group = xEventGroupCreate();
+    // Создание мьютекса для защиты сокета
+    sock_mutex = xSemaphoreCreateMutex();
+    if (sock_mutex == NULL) {
+        ESP_LOGE(TAG, "Failed to create socket mutex");
+        vTaskDelete(NULL);
+        return;
+    }
     // Регистрация обработчика данных от UART
     uart_register_read_handler(ntrip_server_uart_handler);
     // Создание задачи контроля keep-alive
@@ -139,6 +156,14 @@ static void ntrip_server_task(void *ctx) {
 
     // Инициализация механизма повторных подключений с экспоненциальной задержкой
     retry_delay_handle_t delay_handle = retry_init(true, 5, 2000, 0);  // Макс 5 попыток, старт 2с
+
+    // Выделение буфера один раз вне цикла для оптимизации памяти
+    char *buffer = malloc(BUFFER_SIZE);
+    if (!buffer) {
+        ESP_LOGE(TAG, "Failed to allocate buffer");
+        vTaskDelete(NULL);
+        return;
+    }
 
     /* Основной цикл подключения к NTRIP кастеру */
     while (true) {
@@ -159,15 +184,19 @@ static void ntrip_server_task(void *ctx) {
         // Ожидание получения IP адреса (WiFi подключение)
         wait_for_ip();
 
-        char *buffer = NULL;                              // Буфер для сетевых операций
-
         /* Загрузка параметров подключения из конфигурации NVS */
-        char *host, *mountpoint, *password;
+        char *host = NULL, *mountpoint = NULL, *password = NULL;
         uint16_t port = config_get_u16(CONF_ITEM(KEY_CONFIG_NTRIP_SERVER_PORT));
         config_get_primitive(CONF_ITEM(KEY_CONFIG_NTRIP_SERVER_PORT), &port);
         config_get_str_blob_alloc(CONF_ITEM(KEY_CONFIG_NTRIP_SERVER_HOST), (void **) &host);
         config_get_str_blob_alloc(CONF_ITEM(KEY_CONFIG_NTRIP_SERVER_PASSWORD), (void **) &password);
         config_get_str_blob_alloc(CONF_ITEM(KEY_CONFIG_NTRIP_SERVER_MOUNTPOINT), (void **) &mountpoint);
+
+        // Проверка успешного выделения памяти для конфигурационных строк
+        if (!host || !password || !mountpoint) {
+            ESP_LOGE(TAG, "Failed to allocate memory for configuration strings");
+            goto _error;
+        }
 
         /* Установка TCP соединения с NTRIP кастером */
         ESP_LOGI(TAG, "Connecting to %s:%d/%s", host, port, mountpoint);
@@ -175,8 +204,6 @@ static void ntrip_server_task(void *ctx) {
         sock = connect_socket(host, port, SOCK_STREAM);   // TCP соединение
         ERROR_ACTION(TAG, sock == CONNECT_SOCKET_ERROR_RESOLVE, goto _error, "Could not resolve host");
         ERROR_ACTION(TAG, sock == CONNECT_SOCKET_ERROR_CONNECT, goto _error, "Could not connect to host");
-
-        buffer = malloc(BUFFER_SIZE);                     // Выделение буфера для HTTP запроса
 
         /* Формирование SOURCE запроса согласно NTRIP протоколу v1.0/2.0 */
         snprintf(buffer, BUFFER_SIZE, "SOURCE %s /%s" NEWLINE \
@@ -226,12 +253,14 @@ static void ntrip_server_task(void *ctx) {
 
         destroy_socket(&sock);                            // Закрытие сокета
 
-        // Освобождение выделенной памяти
-        free(buffer);
-        free(host);
-        free(mountpoint);
-        free(password);
+        // Освобождение выделенной памяти для конфигурационных строк
+        if (host) free(host);
+        if (mountpoint) free(mountpoint);
+        if (password) free(password);
     }
+    
+    // Освобождение буфера при выходе из задачи (никогда не должно произойти)
+    free(buffer);
 }
 
 /// Инициализация первичного NTRIP сервера

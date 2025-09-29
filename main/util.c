@@ -69,8 +69,9 @@ char *sockaddrtostr(struct sockaddr *a) {
         return "UNKNOWN";
     }
 
-    // Append port number
-    sprintf(addr_str + strlen(addr_str), ":%d", ntohs(port));
+    // Append port number - безопасная версия
+    int remaining = sizeof(addr_str) - strlen(addr_str);
+    snprintf(addr_str + strlen(addr_str), remaining, ":%d", ntohs(port));
 
     return addr_str;
 }
@@ -115,7 +116,7 @@ int connect_socket(char *host, int port, int socktype) {
     addr_hints.ai_protocol = 0;
 
     char port_string[6];
-    sprintf(port_string, "%u", port);
+    snprintf(port_string, sizeof(port_string), "%u", port);
     err = getaddrinfo(host, port_string, &addr_hints, &addr_results);
     if (err < 0) return CONNECT_SOCKET_ERROR_RESOLVE;
 
@@ -164,9 +165,16 @@ char *http_auth_basic_header(const char *username, const char *password) {
     char *digest = NULL;
     size_t n = 0;
     asprintf(&user_info, "%s:%s", username, password);
+    if (!user_info) return NULL;
+    
     mbedtls_base64_encode(NULL, 0, &n, (const unsigned char *)user_info, strlen(user_info));
     digest = calloc(1, 6 + n + 1);
-    strcpy(digest, "Basic ");
+    if (!digest) {
+        free(user_info);
+        return NULL;
+    }
+    
+    strlcpy(digest, "Basic ", 7);
     mbedtls_base64_encode((unsigned char *)digest + 6, n, (size_t *)&out, (const unsigned char *)user_info, strlen(user_info));
     free(user_info);
     return digest;

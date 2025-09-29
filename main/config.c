@@ -634,6 +634,10 @@ esp_err_t config_get_str_blob_alloc(const config_item_t *item, void **out_value)
     esp_err_t ret = config_get_str_blob(item, NULL, &length);
     if (ret != ESP_OK) return ret;
     *out_value = malloc(length);
+    if (*out_value == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate %d bytes for config item %s", length, item->key);
+        return ESP_ERR_NO_MEM;
+    }
     return config_get_str_blob(item, *out_value, &length);
 }
 
@@ -710,13 +714,18 @@ bool is_socket_client_tcp(void) {
     return config_get_bool1(CONF_ITEM(KEY_CONFIG_SOCKET_CLIENT_TCP));
 }
 
+// Статические буферы для строковых значений конфигурации (избегаем утечек памяти)
+static char socket_client_host_buffer[128] = {0};
+static char socket_client_connect_msg_buffer[256] = {0};
+
 const char* get_socket_client_host(void) {
     const config_item_t *item = CONF_ITEM(KEY_CONFIG_SOCKET_CLIENT_HOST);
     if (!item) return "";
     
-    char *host = NULL;
-    if (config_get_str_blob_alloc(item, (void**)&host) == ESP_OK) {
-        return host;
+    size_t length = sizeof(socket_client_host_buffer);
+    esp_err_t ret = config_get_str_blob(item, socket_client_host_buffer, &length);
+    if (ret == ESP_OK) {
+        return socket_client_host_buffer;
     }
     return "";
 }
@@ -729,9 +738,10 @@ const char* get_socket_client_connect_message(void) {
     const config_item_t *item = CONF_ITEM(KEY_CONFIG_SOCKET_CLIENT_CONNECT_MESSAGE);
     if (!item) return "";
     
-    char *msg = NULL;
-    if (config_get_str_blob_alloc(item, (void**)&msg) == ESP_OK) {
-        return msg;
+    size_t length = sizeof(socket_client_connect_msg_buffer);
+    esp_err_t ret = config_get_str_blob(item, socket_client_connect_msg_buffer, &length);
+    if (ret == ESP_OK) {
+        return socket_client_connect_msg_buffer;
     }
     return "";
 }

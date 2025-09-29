@@ -142,9 +142,9 @@ static char* get_path_from_uri(char *dest, const char *base_path, const char *ur
         return NULL;
     }
 
-    // Construct full path (base + path)
-    strcpy(dest, base_path);
-    strlcpy(dest + base_pathlen, uri, pathlen + 1);
+    // Construct full path (base + path) - безопасная копия
+    strlcpy(dest, base_path, destsize);
+    strlcpy(dest + base_pathlen, uri, destsize - base_pathlen);
 
     // Return pointer to path, skipping the base
     return dest + base_pathlen;
@@ -176,6 +176,10 @@ static esp_err_t basic_auth(httpd_req_t *req) {
     if (authorization_length == 0) goto _auth_required;
 
     char *authorization_header = malloc(authorization_length);
+    if (!authorization_header) {
+        ESP_LOGE(TAG, "Failed to allocate memory for authorization header");
+        goto _auth_required;
+    }
     httpd_req_get_hdr_value_str(req, "Authorization", authorization_header, authorization_length);
 
     bool authenticated = strcasecmp(basic_authentication, authorization_header) == 0;
@@ -328,6 +332,10 @@ static esp_err_t file_check_etag_hash(httpd_req_t *req, char *file_hash_path, ch
     size_t if_none_match_length = httpd_req_get_hdr_value_len(req, "If-None-Match") + 1;
     if (if_none_match_length > 1) {
         char *if_none_match = malloc(if_none_match_length);
+        if (!if_none_match) {
+            ESP_LOGE(TAG, "Failed to allocate memory for If-None-Match header");
+            return ESP_ERR_NO_MEM;
+        }
         httpd_req_get_hdr_value_str(req, "If-None-Match", if_none_match, if_none_match_length);
 
         bool header_match = strcmp(etag, if_none_match) == 0;
@@ -363,7 +371,7 @@ static esp_err_t file_get_handler(httpd_req_t *req) {
 
     // If name has trailing '/', respond with index page
     if (file_name[strlen(file_name) - 1] == '/' && strlen(file_name) + strlen("index.html") < FILE_PATH_MAX) {
-        strcpy(&file_name[strlen(file_name)], "index.html");
+        strlcat(file_name, "index.html", FILE_PATH_MAX);
 
         httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     }
@@ -376,9 +384,9 @@ static esp_err_t file_get_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }, "Could not stat file %s", file_path)
 
-    // Check file hash (if matches request, file is not modified)
-    strcpy(file_hash_path, file_path);
-    strcpy(&file_hash_path[strlen(file_hash_path)], FILE_HASH_SUFFIX);
+    // Check file hash (if matches request, file is not modified) - безопасная копия
+    strlcpy(file_hash_path, file_path, sizeof(file_hash_path));
+    strlcat(file_hash_path, FILE_HASH_SUFFIX, sizeof(file_hash_path));
     char etag[8 + 2 + 1] = ""; // Store CRC32, quotes and \0
     if (file_check_etag_hash(req, file_hash_path, etag, sizeof(etag)) == ESP_OK) {
         httpd_resp_set_status(req, "304 Not Modified");
@@ -887,6 +895,11 @@ static httpd_handle_t web_server_start(void)
     }
 
     buffer = malloc(BUFFER_SIZE);
+    if (!buffer) {
+        ESP_LOGE(TAG, "Failed to allocate buffer for web server");
+        httpd_stop(server);
+        return NULL;
+    }
 
     return server;
 }

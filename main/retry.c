@@ -17,6 +17,7 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <esp_log.h>
 #include <uart.h>
 #include "retry.h"
 
@@ -39,6 +40,10 @@ static const int delays_count = sizeof(delays) / sizeof(int);
 
 retry_delay_handle_t retry_init(bool first_instant, uint8_t short_count, int short_delay, int max_delay) {
     retry_delay_handle_t handle = malloc(sizeof(struct retry_delay));
+    if (!handle) {
+        ESP_LOGE("RETRY", "Failed to allocate memory for retry_delay handle");
+        return NULL;
+    }
     *handle = (struct retry_delay) {
             .attempts = 0,
 

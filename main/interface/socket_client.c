@@ -188,7 +188,9 @@ static void socket_client_task(void *params) {
         if (len < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 // Timeout - check for UART data to send
-                size_t uart_data_len = uart_read_bytes(UART_NUM_0, (uint8_t*)buffer, 
+                // Используем номер UART из конфигурации вместо хардкода
+                uart_port_t uart_port = config_get_u8(CONF_ITEM(KEY_CONFIG_UART_NUM));
+                size_t uart_data_len = uart_read_bytes(uart_port, (uint8_t*)buffer, 
                                                        sizeof(buffer) - 1, 10 / portTICK_PERIOD_MS);
                 if (uart_data_len > 0) {
                     socket_client_send_data(buffer, uart_data_len);
