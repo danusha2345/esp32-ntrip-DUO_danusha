@@ -50,13 +50,21 @@ jobs:
         echo "=== Build Summary for ${{ matrix.target }} ==="
         ls -lh build/*.bin build/*.elf || true
         
-        # Проверяем размер прошивки
-        APP_SIZE=$(stat -f%z build/esp32-xbee.bin 2>/dev/null || stat -c%s build/esp32-xbee.bin)
-        echo "Application size: $(($APP_SIZE / 1024)) KB"
+        # Find the main firmware file (name varies by target)
+        MAIN_BIN=$(find build/ -maxdepth 1 -name "${{ matrix.target }}-ntrip-duo.bin" -o -name "esp32-ntrip-duo.bin" | head -1)
         
-        # Предупреждение если размер больше 1.5MB
-        if [ $APP_SIZE -gt 1572864 ]; then
-          echo "⚠️ Warning: Application size is larger than 1.5MB"
+        if [ -n "$MAIN_BIN" ] && [ -f "$MAIN_BIN" ]; then
+          APP_SIZE=$(stat -f%z "$MAIN_BIN" 2>/dev/null || stat -c%s "$MAIN_BIN")
+          echo "Application size: $(($APP_SIZE / 1024)) KB"
+          echo "Firmware file: $(basename $MAIN_BIN)"
+          
+          # Предупреждение если размер больше 1.5MB
+          if [ $APP_SIZE -gt 1572864 ]; then
+            echo "⚠️ Warning: Application size is larger than 1.5MB"
+          fi
+        else
+          echo "❌ Error: Main firmware file not found"
+          exit 1
         fi
         
     - name: Upload build artifacts (on failure)
