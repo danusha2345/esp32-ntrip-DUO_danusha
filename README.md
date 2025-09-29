@@ -160,3 +160,21 @@ See [PIN_MAPPING.md](docs/PIN_MAPPING.md) for detailed GPIO assignments.
 - Connect GND to GND
 - Optional: Status LEDs on configured GPIO pins
 - Optional: SD card for data logging
+
+## 🔌 Hardware Setup
+
+### Supported Boards
+- **ESP32**: Original ESP32 development boards
+- **ESP32-C3**: ESP32-C3 with RISC-V core and USB JTAG
+- **ESP32-S3**: ESP32-S3 based boards with enhanced GPIO
+- **ESP32-C6**: Latest ESP32-C6 with WiFi 6 support
+
+### Pin Connections
+See [PIN_MAPPING.md](docs/PIN_MAPPING.md) for detailed GPIO assignments.
+
+**Basic Connection:**
+- Connect GNSS TX to ESP32 RX pin
+- Connect GNSS RX to ESP32 TX pin  
+- Connect GND to GND
+- Optional: Status LEDs on configured GPIO pins
+- Optional: SD card for data logging
