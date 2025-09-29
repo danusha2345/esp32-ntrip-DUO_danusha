@@ -8,6 +8,7 @@
 #include "config.h"
 #include <time.h>
 #include <sys/stat.h>
+#include <string.h>
 
 static const char *TAG = "SD_LOGGER";
 
