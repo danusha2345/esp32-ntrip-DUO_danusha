@@ -343,17 +343,15 @@ jobs:
         body: |
           ## ESP32 NTRIP DUO Firmware Release ${{ steps.version.outputs.version }}
           
-          ### ✨ New Features
-          - 🎯 **Serial Commands**: Remote GNSS module configuration via web interface
-          - 💾 **SD Card Logging**: Automatic RTCM data logging with daily file rotation
-          - 🔧 **Multi-chip Support**: Native support for ESP32, ESP32-C3, ESP32-S3, and ESP32-C6
+          ### 🐛 Bug Fixes
+          - **Fixed compilation error**: Added missing `string.h` include in `sd_logger.c`
+          - **Fixed build scripts**: Corrected firmware filename references (removed hardcoded `esp32-xbee.bin`)
+          - **Fixed GitHub Actions**: Build workflows now dynamically detect correct firmware filenames
           
           ### 🔧 Improvements  
-          - **Merged Firmware Generation**: Single-file firmware for simplified flashing
-          - **ESP32-C6 Compilation Fix**: Resolved ESP-IDF 5.5 compatibility issue
-          - **Enhanced web interface**: Socket Server/Client and Serial Commands modules
-          - **Conditional GPIO pin mappings** for different chips
-          - **Fixed deprecated function calls** and task signatures
+          - **Improved build reliability**: All targets (ESP32, ESP32-C3, ESP32-S3, ESP32-C6) now build successfully
+          - **Better error handling**: Build scripts now properly handle target-specific firmware names
+          - **Enhanced CI/CD**: GitHub Actions workflows are more robust and reliable
           
           ### 📦 Downloads
           Choose the appropriate firmware for your hardware:
