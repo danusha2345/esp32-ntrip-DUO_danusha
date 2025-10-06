@@ -20,4 +20,5 @@ idf_component_register(SRCS "main.c"
         INCLUDE_DIRS "include"
 		REQUIRES esp_netif app_update driver esp_wifi nvs_flash espcoredump tcp_transport esp_http_server mbedtls json vfs spiffs lwip button sdmmc fatfs)
 
+# Create SPIFFS image with explicit parameters matching ESP32-S3
 spiffs_create_partition_image(www ../www FLASH_IN_PROJECT)

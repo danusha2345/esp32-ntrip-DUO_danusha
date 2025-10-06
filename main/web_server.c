@@ -20,6 +20,8 @@
 #include <wifi.h>
 #include <cJSON.h>
 #include <sys/param.h>
+#include <sys/stat.h>
+#include <dirent.h>
 #include <esp_vfs.h>
 #include <esp_spiffs.h>
 #include <lwip/apps/mdns.h>
@@ -72,7 +74,7 @@ static enum auth_method auth_method;
     (strcasecmp(&filename[strlen(filename) - sizeof(ext) + 1], ext) == 0)
 
 static esp_err_t www_spiffs_init() {
-    ESP_LOGD(TAG, "Initializing SPIFFS");
+    ESP_LOGI(TAG, "Initializing SPIFFS...");
 
     esp_vfs_spiffs_conf_t conf = {
             .base_path = WWW_PARTITION_PATH,
@@ -100,7 +102,27 @@ static esp_err_t www_spiffs_init() {
         return ESP_FAIL;
     }
 
-    ESP_LOGD(TAG, "Partition size: total: %d, used: %d", total, used);
+    ESP_LOGI(TAG, "SPIFFS: total=%d bytes, used=%d bytes (%.1f%%)", 
+             total, used, (used * 100.0) / total);
+    
+    // List files in SPIFFS
+    DIR *dir = opendir(WWW_PARTITION_PATH);
+    if (dir) {
+        ESP_LOGI(TAG, "Files in %s:", WWW_PARTITION_PATH);
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+            char full_path[300];
+            snprintf(full_path, sizeof(full_path), "%s/%s", WWW_PARTITION_PATH, entry->d_name);
+            struct stat st;
+            if (stat(full_path, &st) == 0) {
+                ESP_LOGI(TAG, "  - %s (%ld bytes)", entry->d_name, st.st_size);
+            }
+        }
+        closedir(dir);
+    } else {
+        ESP_LOGE(TAG, "Failed to open directory %s", WWW_PARTITION_PATH);
+    }
+    
     return ESP_OK;
 }
 
@@ -357,6 +379,8 @@ static esp_err_t file_check_etag_hash(httpd_req_t *req, char *file_hash_path, ch
 static esp_err_t file_get_handler(httpd_req_t *req) {
     if (check_auth(req) == ESP_FAIL) return ESP_FAIL;
 
+    ESP_LOGI(TAG, "File request for URI: %s", req->uri);
+
     char file_path[FILE_PATH_MAX - strlen(FILE_HASH_SUFFIX)];
     char file_hash_path[FILE_PATH_MAX];
     FILE *fd = NULL, *fd_hash = NULL;
@@ -365,9 +389,12 @@ static esp_err_t file_get_handler(httpd_req_t *req) {
     // Extract filename from URL
     char *file_name = get_path_from_uri(file_path, WWW_PARTITION_PATH, req->uri, sizeof(file_path));
     ERROR_ACTION(TAG, file_name == NULL, {
+        ESP_LOGE(TAG, "Filename too long for URI: %s", req->uri);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Filename too long");
         return ESP_FAIL;
     }, "Filename too long")
+    
+    ESP_LOGI(TAG, "Extracted file path: %s", file_path);
 
     // If name has trailing '/', respond with index page
     if (file_name[strlen(file_name) - 1] == '/' && strlen(file_name) + strlen("index.html") < FILE_PATH_MAX) {
@@ -379,10 +406,14 @@ static esp_err_t file_get_handler(httpd_req_t *req) {
     set_content_type_from_file(req, file_name);
 
     // Check if file exists
+    ESP_LOGI(TAG, "Checking if file exists: %s", file_path);
     ERROR_ACTION(TAG, stat(file_path, &file_stat) == -1, {
+        ESP_LOGE(TAG, "File not found: %s (errno: %d, %s)", file_path, errno, strerror(errno));
         httpd_resp_send_404(req);
         return ESP_FAIL;
     }, "Could not stat file %s", file_path)
+    
+    ESP_LOGI(TAG, "File found: %s (%ld bytes)", file_path, file_stat.st_size);
 
     // Check file hash (if matches request, file is not modified) - безопасная копия
     strlcpy(file_hash_path, file_path, sizeof(file_hash_path));
@@ -845,6 +876,38 @@ static esp_err_t serial_command_post_handler(httpd_req_t *req) {
     return json_response(req, resp);
 }
 
+static esp_err_t test_spiffs_handler(httpd_req_t *req) {
+    httpd_resp_set_type(req, "text/plain");
+    
+    // Test if SPIFFS is mounted
+    DIR *dir = opendir("/www");
+    if (dir == NULL) {
+        httpd_resp_sendstr(req, "ERROR: Cannot open /www directory\n");
+        httpd_resp_sendstr(req, "SPIFFS is NOT mounted!\n");
+        return ESP_OK;
+    }
+    
+    httpd_resp_sendstr(req, "SPIFFS is mounted!\nFiles in /www:\n\n");
+    
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        char line[300];
+        snprintf(line, sizeof(line), "- %s\n", entry->d_name);
+        httpd_resp_sendstr(req, line);
+    }
+    closedir(dir);
+    
+    return ESP_OK;
+}
+
+static esp_err_t root_redirect_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Root path requested, redirecting to /index.html");
+    httpd_resp_set_status(req, "301 Moved Permanently");
+    httpd_resp_set_hdr(req, "Location", "/index.html");
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
 static esp_err_t register_uri_handler(httpd_handle_t server, const char *path, httpd_method_t method, esp_err_t (*handler)(httpd_req_t *r)) {
     httpd_uri_t uri_config_get = {
             .uri        = path,
@@ -868,11 +931,20 @@ static httpd_handle_t web_server_start(void)
 
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    // Увеличиваем число доступных слотов под URI-обработчики: у нас >12 маршрутов
+    // иначе httpd_register_uri_handler начнёт возвращать "no slots left" и файловый обработчик "/*" не зарегистрируется
+    config.max_uri_handlers = 20;
     config.uri_match_fn = httpd_uri_match_wildcard;
 
     // Start the httpd server
     ESP_LOGI(TAG, "Starting server on port: '%d'", config.server_port);
     if (httpd_start(&server, &config) == ESP_OK) {
+        // Register test endpoint for SPIFFS debugging
+        register_uri_handler(server, "/test", HTTP_GET, test_spiffs_handler);
+        
+        // Register root handler first for explicit / requests
+        register_uri_handler(server, "/", HTTP_GET, root_redirect_handler);
+        
         register_uri_handler(server, "/config", HTTP_GET, config_get_handler);
         register_uri_handler(server, "/config", HTTP_POST, config_post_handler);
         register_uri_handler(server, "/status", HTTP_GET, status_get_handler);
@@ -886,6 +958,7 @@ static httpd_handle_t web_server_start(void)
         register_uri_handler(server, "/sdlog/status", HTTP_GET, sd_log_status_handler);
         register_uri_handler(server, "/sdlog/toggle", HTTP_POST, sd_log_toggle_handler);
 
+        // Wildcard handler for all files - MUST be last
         register_uri_handler(server, "/*", HTTP_GET, file_get_handler);
     }
 
@@ -905,6 +978,19 @@ static httpd_handle_t web_server_start(void)
 }
 
 void web_server_init() {
-    www_spiffs_init();
-    web_server_start();
+    esp_err_t ret = www_spiffs_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "SPIFFS initialization failed! Web interface will not work.");
+        ESP_LOGE(TAG, "Error: %s (%d)", esp_err_to_name(ret), ret);
+        // Continue anyway to start the server
+    } else {
+        ESP_LOGI(TAG, "SPIFFS initialized successfully");
+    }
+    
+    httpd_handle_t server = web_server_start();
+    if (server == NULL) {
+        ESP_LOGE(TAG, "Failed to start web server");
+    } else {
+        ESP_LOGI(TAG, "Web server started successfully");
+    }
 }
