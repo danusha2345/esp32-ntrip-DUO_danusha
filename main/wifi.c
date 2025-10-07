@@ -305,11 +305,8 @@ void wifi_init() {
         ap_ssid_len--; // Remove null terminator from length
         config_ap.ap.ssid_len = ap_ssid_len;
         if (ap_ssid_len == 0) {
-            // Generate a default AP SSID based on MAC address and store
-            uint8_t mac[6];
-            esp_wifi_get_mac(ESP_IF_WIFI_AP, mac);
-            snprintf((char *) config_ap.ap.ssid, sizeof(config_ap.ap.ssid), "ESP_XBee_%02X%02X%02X",
-                    mac[3], mac[4], mac[5]);
+            // Generate a default AP SSID and store
+            snprintf((char *) config_ap.ap.ssid, sizeof(config_ap.ap.ssid), "ntrip-DUO_danusha");
             config_ap.ap.ssid_len = strlen((char *) config_ap.ap.ssid);
 
             config_set_str(KEY_CONFIG_WIFI_AP_SSID, (char *) config_ap.ap.ssid);
@@ -366,15 +363,14 @@ void wifi_init() {
         size_t sta_password_len = sizeof(config_sta.sta.password);
         config_get_str_blob(CONF_ITEM(KEY_CONFIG_WIFI_STA_PASSWORD), &config_sta.sta.password, &sta_password_len);
         sta_password_len--; // Remove null terminator from length
-        config_sta.sta.scan_method = config_get_bool1(CONF_ITEM(KEY_CONFIG_WIFI_STA_SCAN_MODE_ALL))
-                ? WIFI_ALL_CHANNEL_SCAN : WIFI_FAST_SCAN;
+        
+        // Всегда используем режим All Channel Scan для максимального обнаружения сетей
+        config_sta.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
 
-        ESP_LOGI(TAG, "WIFI_STA_CONNECTING: %s (%s), %s scan", config_sta.sta.ssid,
-                sta_password_len == 0 ? "open" : "with password",
-                config_sta.sta.scan_method == WIFI_ALL_CHANNEL_SCAN ? "all channel" : "fast");
-        uart_nmea("$PESP,WIFI,STA,CONNECTING,%s,%c,%c", config_sta.sta.ssid,
-                sta_password_len == 0 ? 'O' : 'P',
-                config_sta.sta.scan_method == WIFI_ALL_CHANNEL_SCAN ? 'A' : 'F');
+        ESP_LOGI(TAG, "WIFI_STA_CONNECTING: %s (%s), all channel scan", config_sta.sta.ssid,
+                sta_password_len == 0 ? "open" : "with password");
+        uart_nmea("$PESP,WIFI,STA,CONNECTING,%s,%c,A", config_sta.sta.ssid,
+                sta_password_len == 0 ? 'O' : 'P');
     }
 
     // Listen for WiFi and IP events
@@ -483,21 +479,44 @@ wifi_ap_record_t *wifi_scan(uint16_t *number) {
         esp_wifi_set_mode(wifi_mode == WIFI_MODE_AP ? WIFI_MODE_APSTA : WIFI_MODE_STA);
     }
 
+    // Расширенная конфигурация сканирования для обнаружения большего количества сетей
     wifi_scan_config_t wifi_scan_config = {
             .ssid = NULL,
             .bssid = NULL,
-            .channel = 0,
-            .show_hidden = 0
+            .channel = 0,              // Сканировать все каналы
+            .show_hidden = 1,          // Показывать скрытые сети
+            .scan_type = WIFI_SCAN_TYPE_ACTIVE,  // Активное сканирование
+            .scan_time = {
+                .active = {
+                    .min = 100,        // Минимальное время на канал (мс)
+                    .max = 300         // Максимальное время на канал (мс)
+                },
+                .passive = 300         // Время пассивного сканирования (мс)
+            }
     };
 
-    esp_wifi_scan_start(&wifi_scan_config, true);
+    ESP_LOGI(TAG, "Starting WiFi scan...");
+    esp_err_t scan_result = esp_wifi_scan_start(&wifi_scan_config, true);
+    if (scan_result != ESP_OK) {
+        ESP_LOGE(TAG, "WiFi scan start failed: %s", esp_err_to_name(scan_result));
+        *number = 0;
+        return NULL;
+    }
 
     esp_wifi_scan_get_ap_num(number);
+    ESP_LOGI(TAG, "WiFi scan completed, found %d networks", *number);
+    
     if (*number <= 0) {
         return NULL;
     }
 
     wifi_ap_record_t *ap_records = (wifi_ap_record_t *) malloc(*number * sizeof(wifi_ap_record_t));
+    if (ap_records == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for scan results");
+        *number = 0;
+        return NULL;
+    }
+    
     esp_wifi_scan_get_ap_records(number, ap_records);
 
     return ap_records;
