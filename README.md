@@ -73,7 +73,7 @@ idf.py flash
 ```
 
 ### 🌐 First Time Configuration
-1. Connect to **ESP32_NTRIP** WiFi network (password: `12345678`)
+1. Connect to **ntrip-DUO_danusha** WiFi network (open, no password)
 2. Open browser and navigate to http://192.168.4.1
 3. Configure your WiFi network and NTRIP settings
 4. Connect your GNSS receiver to the configured UART pins
@@ -125,74 +125,22 @@ The firmware includes full TCP/UDP socket functionality:
 - **Multiple Clients**: Server supports multiple concurrent connections
 - **IPv6 Support**: Dual-stack IPv4/IPv6 compatibility
 
-## 🔌 Hardware Setup
+## 📚 Additional Resources
 
-### Supported Boards
-- **ESP32**: Original ESP32 development boards
-- **ESP32-C3**: ESP32-C3 with RISC-V core and USB JTAG
-- **ESP32-S3**: ESP32-S3 based boards with enhanced GPIO
-- **ESP32-C6**: Latest ESP32-C6 with WiFi 6 support
+- **Installation Video**: [YouTube Tutorial](https://youtu.be/33Mu5EV7fOE?si=J6kwCt6bbmIu7HnS)
+- **Issue Tracker**: [GitHub Issues](https://github.com/danusha2345/esp32-ntrip-DUO_danusha/issues)
+- **Contributing**: Pull requests are welcome!
 
-### Pin Connections
-See [PIN_MAPPING.md](docs/PIN_MAPPING.md) for detailed GPIO assignments.
+## 📝 Notes
 
-**Basic Connection:**
-- Connect GNSS TX to ESP32 RX pin
-- Connect GNSS RX to ESP32 TX pin  
-- Connect GND to GND
-- Optional: Status LEDs on configured GPIO pins
-- Optional: SD card for data logging
+- Default WiFi AP name: **ntrip-DUO_danusha**
+- Default WiFi AP: **Open network (no password)**
+- Default web interface: **http://192.168.4.1**
+- Compatible with ESP-IDF 5.4 (with some deprecation warnings)
+- Project is under active development
 
-## 🔌 Hardware Setup
+## 📄 License
 
-### Supported Boards
-- **ESP32**: Original ESP32 development boards
-- **ESP32-C3**: ESP32-C3 with RISC-V core and USB JTAG
-- **ESP32-S3**: ESP32-S3 based boards with enhanced GPIO
-- **ESP32-C6**: Latest ESP32-C6 with WiFi 6 support
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
 
-### Pin Connections
-See [PIN_MAPPING.md](docs/PIN_MAPPING.md) for detailed GPIO assignments.
-
-**Basic Connection:**
-- Connect GNSS TX to ESP32 RX pin
-- Connect GNSS RX to ESP32 TX pin  
-- Connect GND to GND
-- Optional: Status LEDs on configured GPIO pins
-- Optional: SD card for data logging
-
-## 🔌 Hardware Setup
-
-### Supported Boards
-- **ESP32**: Original ESP32 development boards
-- **ESP32-C3**: ESP32-C3 with RISC-V core and USB JTAG
-- **ESP32-S3**: ESP32-S3 based boards with enhanced GPIO
-- **ESP32-C6**: Latest ESP32-C6 with WiFi 6 support
-
-### Pin Connections
-See [PIN_MAPPING.md](docs/PIN_MAPPING.md) for detailed GPIO assignments.
-
-**Basic Connection:**
-- Connect GNSS TX to ESP32 RX pin
-- Connect GNSS RX to ESP32 TX pin  
-- Connect GND to GND
-- Optional: Status LEDs on configured GPIO pins
-- Optional: SD card for data logging
-
-## 🔌 Hardware Setup
-
-### Supported Boards
-- **ESP32**: Original ESP32 development boards
-- **ESP32-C3**: ESP32-C3 with RISC-V core and USB JTAG
-- **ESP32-S3**: ESP32-S3 based boards with enhanced GPIO
-- **ESP32-C6**: Latest ESP32-C6 with WiFi 6 support
-
-### Pin Connections
-See [PIN_MAPPING.md](docs/PIN_MAPPING.md) for detailed GPIO assignments.
-
-**Basic Connection:**
-- Connect GNSS TX to ESP32 RX pin
-- Connect GNSS RX to ESP32 TX pin  
-- Connect GND to GND
-- Optional: Status LEDs on configured GPIO pins
-- Optional: SD card for data logging
+Based on [ESP32 XBee](https://github.com/nebkat/esp32-xbee) by Nebojsa Cvetkovic.
