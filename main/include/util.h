@@ -27,5 +27,6 @@ char *extract_http_header(const char *buffer, const char *key);
 
 int connect_socket(char *host, int port, int socktype);
 char *http_auth_basic_header(const char *username, const char *password);
+esp_err_t write_all(int fd, char *buf, size_t buf_len);
 
 #endif //ESP32_XBEE_UTIL_H

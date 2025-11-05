@@ -225,6 +225,10 @@ static esp_err_t hotspot_auth(httpd_req_t *req) {
     getpeername(sock, (struct sockaddr *)&client_addr, &socklen);
 
     // TODO: Correctly read IPv4?
+    // KNOWN ISSUE: IPv4-mapped IPv6 address handling needs improvement.
+    // Current implementation assumes dual-stack socket with IPv4 addresses
+    // mapped to IPv6 format (::ffff:x.x.x.x). For pure IPv4 sockets, this
+    // may need adjustment to use sockaddr_in instead of sockaddr_in6.
     // ERROR_ACTION(TAG, client_addr.sin6_family != AF_INET, goto _auth_error, "IPv6 connections not supported, IP family %d", client_addr.sin6_family);
 
     wifi_sta_list_t *ap_sta_list = wifi_ap_sta_list();
@@ -232,6 +236,9 @@ static esp_err_t hotspot_auth(httpd_req_t *req) {
     esp_wifi_ap_get_sta_list_with_ip(ap_sta_list, &esp_netif_ap_sta_list);
 
     // TODO: Correctly read IPv4?
+    // KNOWN ISSUE: IP address comparison assumes IPv4-mapped-IPv6 format.
+    // The 4th word ([3]) of sin6_addr contains the IPv4 address in this case.
+    // This works for dual-stack but may fail for pure IPv6 connections.
     for (int i = 0; i < esp_netif_ap_sta_list.num; i++) {
         if (esp_netif_ap_sta_list.sta[i].ip.addr == client_addr.sin6_addr.un.u32_addr[3]) return ESP_OK;
     }
@@ -586,6 +593,9 @@ static esp_err_t config_post_handler(httpd_req_t *req) {
             }
 
             // TODO: Cleanup
+            // REFACTORING NEEDED: This large if-else chain should be refactored into
+            // a switch statement or a lookup table for better maintainability.
+            // Consider extracting each type handler into separate functions.
             esp_err_t err;
             if (item.type > CONFIG_ITEM_TYPE_MAX) {
                 err = ESP_ERR_INVALID_ARG;
