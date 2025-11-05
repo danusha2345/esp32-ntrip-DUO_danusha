@@ -9,6 +9,7 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "soc/soc_caps.h"
 
 #include "button.h"
 
@@ -114,7 +115,7 @@ QueueHandle_t button_init(unsigned long long pin_select) {
 
     // Scan the pin map to determine number of pins
     pin_count = 0;
-    for (int pin=0; pin<=39; pin++) {
+    for (int pin=0; pin<SOC_GPIO_PIN_COUNT; pin++) {
         if ((1ULL<<pin) & pin_select) {
             pin_count++;
         }
@@ -126,7 +127,7 @@ QueueHandle_t button_init(unsigned long long pin_select) {
 
     // Scan the pin map to determine each pin number, populate the state
     uint32_t idx = 0;
-    for (int pin=0; pin<=39; pin++) {
+    for (int pin=0; pin<SOC_GPIO_PIN_COUNT; pin++) {
         if ((1ULL<<pin) & pin_select) {
             ESP_LOGD(TAG, "Registering button input: %d", pin);
             debounce[idx].pin = pin;

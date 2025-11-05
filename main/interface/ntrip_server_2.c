@@ -136,7 +136,7 @@ static void ntrip_server_task(void *ctx) {
     // Регистрация обработчика UART (оба сервера получают одинаковые данные)
     uart_register_read_handler(ntrip_server_uart_handler);
     // Создание независимой задачи keep-alive для второго сервера
-    xTaskCreate(ntrip_server_sleep_task, "ntrip_server_sleep_task", 2048, NULL, TASK_PRIORITY_INTERFACE, &sleep_task);
+    xTaskCreate(ntrip_server_sleep_task, "ntrip_server_2_sleep_task", 2048, NULL, TASK_PRIORITY_INTERFACE, &sleep_task);
 
     // Настройка отдельного статусного светодиода для второго сервера
     config_color_t status_led_color = config_get_color(CONF_ITEM(KEY_CONFIG_NTRIP_SERVER_2_COLOR));
