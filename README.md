@@ -1,5 +1,5 @@
 # ESP32 NTRIP Duo
-
+[![Boosty](https://img.shields.io/badge/Boosty-Buy_me_a_coffee-FF7143?logo=boosty&logoColor=white&style=for-the-badge)](https://boosty.to/danusha/donate)
 [![Build Test](https://github.com/danusha2345/esp32-ntrip-DUO_danusha/actions/workflows/build-test.yml/badge.svg)](https://github.com/danusha2345/esp32-ntrip-DUO_danusha/actions/workflows/build-test.yml)
 [![Build and Release](https://github.com/danusha2345/esp32-ntrip-DUO_danusha/actions/workflows/build-release.yml/badge.svg)](https://github.com/danusha2345/esp32-ntrip-DUO_danusha/actions/workflows/build-release.yml)
 [![GitHub release](https://img.shields.io/github/v/release/danusha2345/esp32-ntrip-DUO_danusha)](https://github.com/danusha2345/esp32-ntrip-DUO_danusha/releases)
