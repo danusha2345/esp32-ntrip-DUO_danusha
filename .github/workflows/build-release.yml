@@ -15,7 +15,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: espressif/idf:v5.5
+    container: espressif/idf:v5.4.4
     strategy:
       matrix:
         target: [esp32, esp32c3, esp32s3, esp32c6]
@@ -42,15 +42,6 @@ jobs:
     - name: Configure and build firmware
       run: |
         . /opt/esp/idf/export.sh
-        
-        # Fix ESP32-C6 esp_coex adapter bug in ESP-IDF 5.5
-        if [ "${{ matrix.target }}" = "esp32c6" ]; then
-          echo "Fixing ESP32-C6 esp_coex adapter include path..."
-          if [ -f "/opt/esp/idf/components/esp_coex/esp32c6/esp_coex_adapter.c" ]; then
-            sed -i 's/#include "esp32c3\/rom\/ets_sys.h"/#include "esp32c6\/rom\/ets_sys.h"/g' /opt/esp/idf/components/esp_coex/esp32c6/esp_coex_adapter.c
-            echo "ESP32-C6 esp_coex fix applied"
-          fi
-        fi
         
         # Clean any existing build directory
         if [ -d "build/" ]; then
@@ -81,7 +72,7 @@ jobs:
         
         # Generate merged firmware (single file containing all partitions)
         echo "Generating merged firmware..."
-        idf.py merge-bin --format raw
+        idf.py merge-bin --format raw --output ${{ matrix.target }}-merged.bin
         
     - name: Create firmware package
       run: |
@@ -92,9 +83,9 @@ jobs:
         cp build/*.elf release/${{ matrix.target }}/
         
         # Copy merged firmware
-        if [ -f "build/merged-binary.bin" ]; then
+        if [ -f "build/${{ matrix.target }}-merged.bin" ]; then
           echo "Copying merged firmware..."
-          cp build/merged-binary.bin release/${{ matrix.target }}/${{ matrix.target }}-ntrip-duo-merged.bin
+          cp build/${{ matrix.target }}-merged.bin release/${{ matrix.target }}/${{ matrix.target }}-ntrip-duo-merged.bin
         fi
         
         # Создаем flash_download_tool конфигурацию
@@ -170,7 +161,7 @@ jobs:
         **UART (Default):**
         - TX: GPIO 1
         - RX: GPIO 3
-        - RTS: GPIO 14
+        - RTS: GPIO 32
         - CTS: GPIO 33
         
         **Button:** GPIO 0
@@ -205,7 +196,7 @@ jobs:
         - TX: GPIO 43
         - RX: GPIO 44
         - RTS: GPIO 16
-        - CTS: GPIO 15
+        - CTS: GPIO 17
         
         **Button:** GPIO 0
         EOF
@@ -221,8 +212,8 @@ jobs:
         **UART (Default):**
         - TX: GPIO 16
         - RX: GPIO 17
-        - RTS: GPIO 4
-        - CTS: GPIO 5
+        - RTS: GPIO 22
+        - CTS: GPIO 23
         
         **Button:** GPIO 9
         EOF
@@ -237,12 +228,11 @@ jobs:
         - SD Card logging with daily RTCM rotation
         - Web-based configuration interface
         - WiFi AP and STA modes
-        - Bluetooth connectivity
         - Status LED indicators
         
         ## First Time Setup
         1. Flash the firmware
-        2. Connect to ESP32_NTRIP WiFi network (password: 12345678)
+        2. Connect to the open ntrip-DUO_danusha WiFi network
         3. Open browser and navigate to http://192.168.4.1
         4. Configure your WiFi and NTRIP settings
         EOF

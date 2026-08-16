@@ -30,6 +30,7 @@
 #include <string.h>
 #include <protocol/nmea.h>
 #include <stream_stats.h>
+#include <freertos/semphr.h>
 
 #include "uart.h"
 #include "config.h"
@@ -67,6 +68,7 @@ static int uart_port = -1;
 static bool uart_log_forward = false;
 
 static stream_stats_handle_t stream_stats;
+static SemaphoreHandle_t write_mutex;
 
 static void uart_task(void *ctx);
 
@@ -100,14 +102,18 @@ void uart_init() {
             uart_port,
             config_get_u8(CONF_ITEM(KEY_CONFIG_UART_TX_PIN)),
             config_get_u8(CONF_ITEM(KEY_CONFIG_UART_RX_PIN)),
-            config_get_u8(CONF_ITEM(KEY_CONFIG_UART_RTS_PIN)),
-            config_get_u8(CONF_ITEM(KEY_CONFIG_UART_CTS_PIN))
+            flow_ctrl_rts ? config_get_u8(CONF_ITEM(KEY_CONFIG_UART_RTS_PIN)) : UART_PIN_NO_CHANGE,
+            flow_ctrl_cts ? config_get_u8(CONF_ITEM(KEY_CONFIG_UART_CTS_PIN)) : UART_PIN_NO_CHANGE
     ));
     ESP_ERROR_CHECK(uart_driver_install(uart_port, UART_BUFFER_SIZE, UART_BUFFER_SIZE, 0, NULL, 0));
 
     stream_stats = stream_stats_new("uart");
+    write_mutex = xSemaphoreCreateMutex();
+    ESP_ERROR_CHECK(write_mutex ? ESP_OK : ESP_ERR_NO_MEM);
 
-    xTaskCreate(uart_task, "uart_task", 8192, NULL, TASK_PRIORITY_UART, NULL);
+    ESP_ERROR_CHECK(xTaskCreate(uart_task, "uart_task", 8192, NULL,
+                                TASK_PRIORITY_UART, NULL) == pdPASS
+                    ? ESP_OK : ESP_ERR_NO_MEM);
 }
 
 static void uart_task(void *ctx) {
@@ -123,7 +129,7 @@ static void uart_task(void *ctx) {
 
         stream_stats_increment(stream_stats, len, 0);
 
-        esp_event_post(UART_EVENT_READ, len, &buffer, len, portMAX_DELAY);
+        esp_event_post(UART_EVENT_READ, len, buffer, len, portMAX_DELAY);
     }
 }
 
@@ -141,7 +147,11 @@ int uart_nmea(const char *fmt, ...) {
     va_start(args, fmt);
 
     char *nmea;
-    nmea_vasprintf(&nmea, fmt, args);
+    int formatted = nmea_vasprintf(&nmea, fmt, args);
+    if (formatted < 0 || !nmea) {
+        va_end(args);
+        return -1;
+    }
     int l = uart_write(nmea, strlen(nmea));
     free(nmea);
 
@@ -154,12 +164,14 @@ int uart_write(char *buf, size_t len) {
     if (uart_port < 0) return 0;
     if (len == 0) return 0;
 
+    xSemaphoreTake(write_mutex, portMAX_DELAY);
     int written = uart_write_bytes(uart_port, buf, len);
+    xSemaphoreGive(write_mutex);
     if (written < 0) return written;
 
-    stream_stats_increment(stream_stats, 0, len);
+    stream_stats_increment(stream_stats, 0, written);
 
-    esp_event_post(UART_EVENT_WRITE, len, buf, len, portMAX_DELAY);
+    if (written > 0) esp_event_post(UART_EVENT_WRITE, written, buf, written, portMAX_DELAY);
 
     return written;
 }

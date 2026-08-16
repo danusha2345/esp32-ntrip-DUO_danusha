@@ -44,20 +44,31 @@ esp_err_t log_init() {
 
 int log_vprintf(const char * format, va_list arg) {
     char buffer[512];
-    int n = vsnprintf(buffer, 512, format, arg);
+    int formatted = vsnprintf(buffer, sizeof(buffer), format, arg);
+    if (formatted < 0) return formatted;
 
-    if (n > 512) {
-        n = 512;
+    size_t length = strnlen(buffer, sizeof(buffer) - 1);
+    const char *start = buffer;
+    const size_t color_prefix_len = strlen(LOG_COLOR_E);
+    const size_t color_suffix_len = strlen(LOG_RESET_COLOR);
+
+    // ESP-IDF logs normally contain ANSI color wrappers, but custom log calls may not.
+    if (length >= color_prefix_len && memcmp(start, LOG_COLOR_E, color_prefix_len) == 0) {
+        start += color_prefix_len;
+        length -= color_prefix_len;
     }
+    if (length >= color_suffix_len &&
+        memcmp(start + length - color_suffix_len, LOG_RESET_COLOR, color_suffix_len) == 0) {
+        length -= color_suffix_len;
+    }
+    if (length > 0 && start[length - 1] == '\n') length--;
 
-    // Remove log colors for web log buffer
-    xRingbufferSend(ringbuf_handle, buffer + strlen(LOG_COLOR_E),
-            n - strlen(LOG_COLOR_E) - strlen(LOG_RESET_COLOR) - 1, 0);
+    xRingbufferSend(ringbuf_handle, start, length, 0);
     xRingbufferSend(ringbuf_handle, "\n", 1, 0);
 
-    uart_log(buffer, n);
+    uart_log(buffer, strnlen(buffer, sizeof(buffer)));
 
-    return n;
+    return formatted;
 }
 
 void *log_receive(size_t *length, TickType_t ticksToWait) {

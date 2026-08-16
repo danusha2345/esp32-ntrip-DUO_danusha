@@ -54,7 +54,7 @@ static const int DATA_SENT_BIT = BIT2;              // Данные были о�
 static int sock = -1;                               // Сокет соединения с вторым NTRIP кастером
 static SemaphoreHandle_t sock_mutex = NULL;         // Мьютекс для защиты сокета от race conditions
 
-static int data_keep_alive;                         // Счётчик времени без данных (мс)
+static volatile int data_keep_alive;                // Счётчик времени без данных (мс)
 static EventGroupHandle_t server_event_group;       // Группа событий для синхронизации
 
 static status_led_handle_t status_led = NULL;       // Дескриптор статусного светодиода второго сервера
@@ -88,8 +88,8 @@ static void ntrip_server_uart_handler(void* handler_args, esp_event_base_t base,
     if (xSemaphoreTake(sock_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         if (sock >= 0) {
             // Отправка RTK данных во второй NTRIP кастер
-            int sent = write(sock, buffer, length);
-            if (sent < 0) {
+            int sent = send(sock, buffer, (size_t) length, MSG_DONTWAIT);
+            if (sent != length) {
                 // При ошибке - закрытие сокета и переподключение
                 destroy_socket(&sock);
                 xSemaphoreGive(sock_mutex);
@@ -108,14 +108,20 @@ static void ntrip_server_uart_handler(void* handler_args, esp_event_base_t base,
 /// Независимо от первичного сервера контролирует время жизни соединения
 static void ntrip_server_sleep_task(void *ctx) {
     vTaskSuspend(NULL);                                 // Начальная приостановка до активации
+    bool timeout_reported = false;
 
     while (true) {
         // Проверка превышения времени ожидания данных от UART
-        if (data_keep_alive == NTRIP_KEEP_ALIVE_THRESHOLD) {
+        if (data_keep_alive >= NTRIP_KEEP_ALIVE_THRESHOLD && !timeout_reported) {
             xEventGroupClearBits(server_event_group, DATA_READY_BIT);
             ESP_LOGW(TAG, "No data received by UART in %d seconds, will not reconnect to caster if disconnected", NTRIP_KEEP_ALIVE_THRESHOLD / 1000);
+            timeout_reported = true;
+        } else if (data_keep_alive < NTRIP_KEEP_ALIVE_THRESHOLD) {
+            timeout_reported = false;
         }
-        data_keep_alive += NTRIP_KEEP_ALIVE_THRESHOLD / 10;
+        if (data_keep_alive < NTRIP_KEEP_ALIVE_THRESHOLD) {
+            data_keep_alive += NTRIP_KEEP_ALIVE_THRESHOLD / 10;
+        }
         vTaskDelay(pdMS_TO_TICKS(NTRIP_KEEP_ALIVE_THRESHOLD / 10));
     }
 }
@@ -128,15 +134,41 @@ static void ntrip_server_task(void *ctx) {
     server_event_group = xEventGroupCreate();
     // Создание мьютекса для защиты сокета
     sock_mutex = xSemaphoreCreateMutex();
-    if (sock_mutex == NULL) {
-        ESP_LOGE(TAG, "Failed to create socket mutex");
+    if (server_event_group == NULL || sock_mutex == NULL) {
+        ESP_LOGE(TAG, "Failed to create secondary NTRIP server synchronization resources");
+        if (sock_mutex != NULL) vSemaphoreDelete(sock_mutex);
+        if (server_event_group != NULL) vEventGroupDelete(server_event_group);
+        sock_mutex = NULL;
+        server_event_group = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    char *buffer = malloc(BUFFER_SIZE);
+    if (!buffer) {
+        ESP_LOGE(TAG, "Failed to allocate buffer");
+        vSemaphoreDelete(sock_mutex);
+        vEventGroupDelete(server_event_group);
+        sock_mutex = NULL;
+        server_event_group = NULL;
         vTaskDelete(NULL);
         return;
     }
     // Регистрация обработчика UART (оба сервера получают одинаковые данные)
     uart_register_read_handler(ntrip_server_uart_handler);
     // Создание независимой задачи keep-alive для второго сервера
-    xTaskCreate(ntrip_server_sleep_task, "ntrip_server_2_sleep_task", 2048, NULL, TASK_PRIORITY_INTERFACE, &sleep_task);
+    if (xTaskCreate(ntrip_server_sleep_task, "ntrip_server_2_sleep_task", 2048, NULL,
+                    TASK_PRIORITY_INTERFACE, &sleep_task) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create secondary NTRIP keep-alive task");
+        uart_unregister_read_handler(ntrip_server_uart_handler);
+        free(buffer);
+        vSemaphoreDelete(sock_mutex);
+        vEventGroupDelete(server_event_group);
+        sock_mutex = NULL;
+        server_event_group = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
 
     // Настройка отдельного статусного светодиода для второго сервера
     config_color_t status_led_color = config_get_color(CONF_ITEM(KEY_CONFIG_NTRIP_SERVER_2_COLOR));
@@ -148,11 +180,16 @@ static void ntrip_server_task(void *ctx) {
 
     // Независимый механизм повторных подключений для второго сервера
     retry_delay_handle_t delay_handle = retry_init(true, 5, 2000, 0);
-
-    // Выделение буфера один раз вне цикла для оптимизации памяти
-    char *buffer = malloc(BUFFER_SIZE);
-    if (!buffer) {
-        ESP_LOGE(TAG, "Failed to allocate buffer");
+    if (!delay_handle) {
+        ESP_LOGE(TAG, "Failed to initialize retry state");
+        uart_unregister_read_handler(ntrip_server_uart_handler);
+        vTaskDelete(sleep_task);
+        sleep_task = NULL;
+        free(buffer);
+        vSemaphoreDelete(sock_mutex);
+        vEventGroupDelete(server_event_group);
+        sock_mutex = NULL;
+        server_event_group = NULL;
         vTaskDelete(NULL);
         return;
     }
@@ -195,8 +232,8 @@ static void ntrip_server_task(void *ctx) {
                 "Source-Agent: NTRIP %s/%s" NEWLINE \
                 NEWLINE, password, mountpoint, NTRIP_SERVER_NAME, &esp_app_get_description()->version[1]);
 
-        int err = write(sock, buffer, strlen(buffer));
-        ERROR_ACTION(TAG, err < 0, goto _error, "Could not send request to caster: %d %s", errno, strerror(errno));
+        esp_err_t err = write_all(sock, buffer, strlen(buffer));
+        ERROR_ACTION(TAG, err != ESP_OK, goto _error, "Could not send request to caster: %d %s", errno, strerror(errno));
 
         int len = read(sock, buffer, BUFFER_SIZE - 1);
         ERROR_ACTION(TAG, len <= 0, goto _error, "Could not receive response from caster: %d %s", errno, strerror(errno));
@@ -252,5 +289,9 @@ void ntrip_server_2_init() {
     if (!config_get_bool1(CONF_ITEM(KEY_CONFIG_NTRIP_SERVER_2_ACTIVE))) return;
 
     // Создание задачи второго NTRIP сервера с тем же приоритетом что и у первого
-    xTaskCreate(ntrip_server_task, "ntrip_server_2_task", 4096, NULL, TASK_PRIORITY_INTERFACE, &server_task);
+    if (xTaskCreate(ntrip_server_task, "ntrip_server_2_task", 4096, NULL,
+                    TASK_PRIORITY_INTERFACE, &server_task) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create secondary NTRIP server task");
+        server_task = NULL;
+    }
 }

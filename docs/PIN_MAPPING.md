@@ -15,7 +15,7 @@ This document describes the GPIO pin assignments for different ESP32 chip varian
 ### UART Interface (Default)
 - **TX**: GPIO 1
 - **RX**: GPIO 3
-- **RTS**: GPIO 14 (optional)
+- **RTS**: GPIO 32 (optional)
 - **CTS**: GPIO 33 (optional)
 
 ### Control
@@ -58,7 +58,7 @@ This document describes the GPIO pin assignments for different ESP32 chip varian
 - **TX**: GPIO 43
 - **RX**: GPIO 44
 - **RTS**: GPIO 16 (optional)
-- **CTS**: GPIO 15 (optional)
+- **CTS**: GPIO 17 (optional)
 
 ### Control
 - **Reset Button**: GPIO 0
@@ -78,8 +78,8 @@ This document describes the GPIO pin assignments for different ESP32 chip varian
 ### UART Interface (Default)
 - **TX**: GPIO 16
 - **RX**: GPIO 17
-- **RTS**: GPIO 4 (optional)
-- **CTS**: GPIO 5 (optional)
+- **RTS**: GPIO 22 (optional)
+- **CTS**: GPIO 23 (optional)
 
 ### Control
 - **Reset Button**: GPIO 9
@@ -98,7 +98,7 @@ This document describes the GPIO pin assignments for different ESP32 chip varian
 
 ### LED Connection Example
 ```
-ESP32_GPIO ----[220Ω]----[LED]----GND
+3V3 ----[220Ω]----[LED]---- ESP32_GPIO
 ```
 
 ### UART Connection to GNSS

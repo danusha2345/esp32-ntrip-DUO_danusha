@@ -17,6 +17,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
+#include "freertos/stream_buffer.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
@@ -26,6 +27,7 @@
 #include "uart.h"
 #include "status_led.h"
 #include "wifi.h"
+#include "util.h"
 
 static const char *TAG = "socket_client";
 
@@ -34,11 +36,13 @@ static const char *TAG = "socket_client";
 #define RECONNECT_DELAY_MS 5000
 #define MAX_RECONNECT_DELAY_MS 60000
 
-static bool client_running = false;
+static volatile bool client_running = false;
 static TaskHandle_t client_task_handle = NULL;
 static int client_socket = -1;
 static socket_client_stats_t client_stats = {0};
 static bool connected = false;
+static StreamBufferHandle_t uart_stream = NULL;
+static status_led_handle_t status_led = NULL;
 
 // Forward declarations
 static void socket_client_task(void *params);
@@ -46,9 +50,18 @@ static esp_err_t socket_client_connect(void);
 static void socket_client_disconnect(void);
 static esp_err_t socket_client_send_data(const char *data, size_t length);
 
+static void socket_client_uart_handler(void *handler_args, esp_event_base_t base,
+                                       int32_t length, void *data) {
+    if (!client_running || !uart_stream || length <= 0) return;
+
+    size_t queued = xStreamBufferSend(uart_stream, data, (size_t) length, 0);
+    if (queued != (size_t) length) {
+        ESP_LOGW(TAG, "UART network buffer full, dropped %u bytes",
+                 (unsigned) ((size_t) length - queued));
+    }
+}
+
 static esp_err_t socket_client_connect(void) {
-    struct sockaddr_in dest_addr = {0};
-    struct hostent *host_entry;
     int reconnect_delay = RECONNECT_DELAY_MS;
 
     // Wait for WiFi connection
@@ -65,55 +78,25 @@ static esp_err_t socket_client_connect(void) {
     }
 
     while (client_running && !connected) {
+        const char *host = get_socket_client_host();
+        int port = get_socket_client_port();
         ESP_LOGI(TAG, "Attempting to connect to %s:%d", 
-                 get_socket_client_host(), get_socket_client_port());
+                 host, port);
 
-        // Resolve hostname
-        host_entry = gethostbyname(get_socket_client_host());
-        if (host_entry == NULL) {
-            ESP_LOGE(TAG, "Failed to resolve hostname: %s", get_socket_client_host());
-            vTaskDelay(reconnect_delay / portTICK_PERIOD_MS);
-            
-            // Exponential backoff
-            reconnect_delay = (reconnect_delay * 2 > MAX_RECONNECT_DELAY_MS) ? 
-                             MAX_RECONNECT_DELAY_MS : reconnect_delay * 2;
-            continue;
-        }
-
-        // Create socket
         int sock_type = is_socket_client_tcp() ? SOCK_STREAM : SOCK_DGRAM;
-        client_socket = socket(AF_INET, sock_type, 0);
+        client_socket = connect_socket(host, port, sock_type);
         if (client_socket < 0) {
-            ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+            ESP_LOGE(TAG, "Unable to connect socket: %d", client_socket);
             vTaskDelay(reconnect_delay / portTICK_PERIOD_MS);
+            reconnect_delay = (reconnect_delay * 2 > MAX_RECONNECT_DELAY_MS) ?
+                              MAX_RECONNECT_DELAY_MS : reconnect_delay * 2;
             continue;
         }
 
         // Set socket timeout
-        struct timeval timeout = {
-            .tv_sec = 10,
-            .tv_usec = 0,
-        };
+        struct timeval timeout = {.tv_sec = 0, .tv_usec = 100000};
         setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
         setsockopt(client_socket, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-
-        // Setup destination address
-        dest_addr.sin_family = AF_INET;
-        dest_addr.sin_port = htons(get_socket_client_port());
-        memcpy(&dest_addr.sin_addr, host_entry->h_addr, host_entry->h_length);
-
-        // Connect to server
-        int err = connect(client_socket, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
-        if (err != 0) {
-            ESP_LOGE(TAG, "Socket unable to connect: errno %d", errno);
-            close(client_socket);
-            client_socket = -1;
-            
-            vTaskDelay(reconnect_delay / portTICK_PERIOD_MS);
-            reconnect_delay = (reconnect_delay * 2 > MAX_RECONNECT_DELAY_MS) ? 
-                             MAX_RECONNECT_DELAY_MS : reconnect_delay * 2;
-            continue;
-        }
 
         connected = true;
         client_stats.connection_count++;
@@ -121,7 +104,7 @@ static esp_err_t socket_client_connect(void) {
         reconnect_delay = RECONNECT_DELAY_MS;  // Reset delay on successful connection
         
         ESP_LOGI(TAG, "Successfully connected to %s:%d", 
-                 get_socket_client_host(), get_socket_client_port());
+                 host, port);
 
         // Send connection message if configured
         const char *connect_msg = get_socket_client_connect_message();
@@ -130,8 +113,7 @@ static esp_err_t socket_client_connect(void) {
             socket_client_send_data("\r\n", 2);
         }
 
-        // Update status LED - green for connected
-        status_led_add(0x00FF0000, STATUS_LED_STATIC, 0, 0, 0);
+        if (status_led) status_led->active = true;
         
         return ESP_OK;
     }
@@ -149,8 +131,7 @@ static void socket_client_disconnect(void) {
     connected = false;
     client_stats.last_disconnect_time = time(NULL);
     
-    // Update status LED - red for disconnected  
-    status_led_add(0xFF000000, STATUS_LED_STATIC, 0, 0, 0);
+    if (status_led) status_led->active = false;
 }
 
 static esp_err_t socket_client_send_data(const char *data, size_t length) {
@@ -158,8 +139,13 @@ static esp_err_t socket_client_send_data(const char *data, size_t length) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    int sent = send(client_socket, data, length, 0);
-    if (sent < 0) {
+    int sent;
+    if (is_socket_client_tcp()) {
+        sent = write_all(client_socket, data, length) == ESP_OK ? (int) length : -1;
+    } else {
+        sent = send(client_socket, data, length, 0);
+    }
+    if (sent < 0 || (size_t) sent != length) {
         ESP_LOGE(TAG, "Send failed: errno %d", errno);
         socket_client_disconnect();
         return ESP_FAIL;
@@ -186,38 +172,25 @@ static void socket_client_task(void *params) {
         // Read data from server
         int len = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
         if (len < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // Timeout - check for UART data to send
-                // Используем номер UART из конфигурации вместо хардкода
-                uart_port_t uart_port = config_get_u8(CONF_ITEM(KEY_CONFIG_UART_NUM));
-                size_t uart_data_len = uart_read_bytes(uart_port, (uint8_t*)buffer, 
-                                                       sizeof(buffer) - 1, 10 / portTICK_PERIOD_MS);
-                if (uart_data_len > 0) {
-                    socket_client_send_data(buffer, uart_data_len);
-                }
-                continue;
-            } else {
+            if (errno != EAGAIN && errno != EWOULDBLOCK) {
                 ESP_LOGE(TAG, "Receive failed: errno %d", errno);
                 socket_client_disconnect();
                 continue;
             }
-        } else if (len == 0) {
+        } else if (len == 0 && is_socket_client_tcp()) {
             ESP_LOGI(TAG, "Server disconnected");
             socket_client_disconnect();
             continue;
+        } else if (len > 0) {
+            client_stats.bytes_received += len;
+            uart_write(buffer, len);
+            ESP_LOGD(TAG, "Received %d bytes from server, forwarded to UART", len);
         }
 
-        // Forward received data to UART
-        buffer[len] = 0;
-        client_stats.bytes_received += len;
-        uart_write_bytes(UART_NUM_0, buffer, len);
-        ESP_LOGD(TAG, "Received %d bytes from server, forwarded to UART", len);
-
-        // Check for UART data to send to server
-        size_t uart_data_len = uart_read_bytes(UART_NUM_0, (uint8_t*)buffer, 
-                                               sizeof(buffer) - 1, 10 / portTICK_PERIOD_MS);
-        if (uart_data_len > 0) {
-            socket_client_send_data(buffer, uart_data_len);
+        size_t uart_data_len;
+        while ((uart_data_len = xStreamBufferReceive(uart_stream, buffer,
+                                                     sizeof(buffer), 0)) > 0) {
+            if (socket_client_send_data(buffer, uart_data_len) != ESP_OK) break;
         }
 
         vTaskDelay(10 / portTICK_PERIOD_MS);
@@ -259,14 +232,27 @@ esp_err_t socket_client_init(void) {
     memset(&client_stats, 0, sizeof(client_stats));
     client_stats.start_time = time(NULL);
 
+    uart_stream = xStreamBufferCreate(4096, 1);
+    if (!uart_stream) {
+        ESP_LOGE(TAG, "Failed to create UART stream buffer");
+        return ESP_ERR_NO_MEM;
+    }
+
+    status_led = status_led_add(0x00FF0055, STATUS_LED_STATIC, 0, 0, 0);
+    if (status_led) status_led->active = false;
+
     // Start client task
     client_running = true;
+    uart_register_read_handler(socket_client_uart_handler);
     BaseType_t ret = xTaskCreate(socket_client_task, "socket_client", 
                                 SOCKET_CLIENT_STACK_SIZE, NULL, 5, &client_task_handle);
     
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create socket client task");
         client_running = false;
+        uart_unregister_read_handler(socket_client_uart_handler);
+        vStreamBufferDelete(uart_stream);
+        uart_stream = NULL;
         return ESP_ERR_NO_MEM;
     }
 
@@ -281,11 +267,20 @@ esp_err_t socket_client_deinit(void) {
 
     ESP_LOGI(TAG, "Stopping socket client");
     client_running = false;
+    if (client_socket >= 0) shutdown(client_socket, SHUT_RDWR);
 
-    // Wait for task to finish
-    if (client_task_handle) {
-        vTaskDelay(100 / portTICK_PERIOD_MS);
+    for (int i = 0; client_task_handle && i < 200; i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
+
+    if (client_task_handle) {
+        ESP_LOGE(TAG, "Socket client task did not stop in time");
+        return ESP_ERR_TIMEOUT;
+    }
+
+    uart_unregister_read_handler(socket_client_uart_handler);
+    vStreamBufferDelete(uart_stream);
+    uart_stream = NULL;
 
     return ESP_OK;
 }
@@ -304,5 +299,7 @@ esp_err_t socket_client_get_stats(socket_client_stats_t *stats) {
 }
 
 esp_err_t socket_client_send_uart_data(const char *data, size_t length) {
-    return socket_client_send_data(data, length);
+    if (!uart_stream || !data || length == 0) return ESP_ERR_INVALID_ARG;
+    return xStreamBufferSend(uart_stream, data, length, 0) == length
+           ? ESP_OK : ESP_ERR_TIMEOUT;
 }

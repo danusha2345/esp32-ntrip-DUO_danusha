@@ -13,6 +13,7 @@ idf_component_register(SRCS "main.c"
 		"wifi.c"
 		"interface/ntrip_server.c"
 		"interface/ntrip_server_2.c"
+		"interface/ntrip_client.c"
 		"interface/socket_server.c"
 		"interface/socket_client.c"
 

@@ -5,7 +5,7 @@
 ### 🌐 NTRIP Protocol Support
 - **Dual NTRIP Server**: Simultaneous connection to two different NTRIP casters
 - **NTRIP Client**: Receive correction data from NTRIP servers
-- **Protocol Compliance**: Full NTRIP 2.0 specification support
+- **Protocol Modes**: NTRIP 2.0-style GET for the rover client and legacy `SOURCE` upload for base-station streams
 - **Automatic Reconnection**: Robust connection management with retry logic
 
 ### 📡 GNSS Integration  
@@ -18,11 +18,11 @@
 - **SD Card Support**: Automatic logging of RTCM correction data
 - **Daily Rotation**: New log files created daily (YYYYMMDD.rtcm format)
 - **Web Control**: Enable/disable logging via web interface
-- **Storage Management**: Configurable storage paths and file management
+- **Buffered Writes**: UART events are queued before SD writes so network forwarding is not blocked
 
 ### 🌐 Network Connectivity
 - **WiFi Station**: Connect to existing WiFi networks
-- **WiFi Access Point**: Create hotspot for configuration (ESP32_NTRIP)
+- **WiFi Access Point**: Create an open `ntrip-DUO_danusha` hotspot for initial configuration
 - **Dual Mode**: Simultaneous AP and STA operation
 - **Static IP**: Support for static IP configuration
 
@@ -31,7 +31,7 @@
 - **Real-time Status**: Live connection status and data statistics
 - **Serial Terminal**: Send commands directly to GNSS receiver
 - **Network Scanner**: WiFi network discovery and connection
-- **Firmware Updates**: Over-the-air (OTA) update capability
+- **Firmware Updates**: Flash over serial or with a compatible web flasher; OTA upload is not implemented
 
 ### 💡 Status Indication
 - **RGB LED**: Multi-color status indication
@@ -43,22 +43,20 @@
 
 ### 🔧 Configuration Management
 - **Non-volatile Storage**: Settings preserved across reboots
-- **Configuration Export**: Backup and restore device settings
 - **Factory Reset**: Return to default configuration
 - **Parameter Validation**: Input validation and error handling
 
 ### 🛡️ Security & Authentication
 - **Web Authentication**: Configurable username/password protection
 - **NTRIP Authentication**: Support for caster authentication
-- **Secure Connections**: HTTPS and encrypted communications
-- **Access Control**: IP-based access restrictions
+- **Transport Security**: The built-in UI uses HTTP and NTRIP/socket connections are plaintext; deploy only on a trusted network
+- **Access Control**: Optional HTTP Basic authentication for the web UI
 
 ### 📊 Monitoring & Diagnostics
 - **Stream Statistics**: Data throughput and connection metrics
 - **Error Reporting**: Detailed error logs and status codes
 - **Core Dump**: Crash dump analysis for debugging
 - **Memory Monitor**: Heap usage and memory leak detection
-- **Task Monitor**: FreeRTOS task status and CPU utilization
 
 ### 🔄 Multi-target Support
 - **ESP32**: Original ESP32 with proven stability
@@ -95,10 +93,9 @@
 ## Technical Specifications
 
 ### Performance
-- **Data Throughput**: Up to 100 Hz GNSS data rates
+- **Data Throughput**: Depends on UART baud rate, WiFi quality and the number of enabled outputs
 - **Concurrent Connections**: Multiple NTRIP sessions
 - **Memory Usage**: Optimized for embedded constraints
-- **Power Consumption**: Low-power modes supported
 
 ### Compatibility
 - **GNSS Receivers**: Universal UART interface
@@ -110,4 +107,4 @@
 - **WiFi Range**: Standard 802.11 limitations
 - **SD Card**: FAT32 file system requirement  
 - **Concurrent Users**: Limited by available memory
-- **HTTPS**: May require additional memory allocation
+- **Encryption**: HTTPS/TLS is not implemented by this firmware

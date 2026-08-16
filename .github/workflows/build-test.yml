@@ -9,7 +9,7 @@ on:
 jobs:
   build-test:
     runs-on: ubuntu-latest
-    container: espressif/idf:v5.3
+    container: espressif/idf:v5.4.4
     strategy:
       fail-fast: false
       matrix:
@@ -51,7 +51,7 @@ jobs:
         ls -lh build/*.bin build/*.elf || true
         
         # Find the main firmware file (name varies by target)
-        MAIN_BIN=$(find build/ -maxdepth 1 -name "${{ matrix.target }}-ntrip-duo.bin" -o -name "esp32-ntrip-duo.bin" | head -1)
+        MAIN_BIN=$(find build/ -maxdepth 1 \( -name "${{ matrix.target }}-ntrip-duo.bin" -o -name "esp32-ntrip-duo.bin" \) | head -1)
         
         if [ -n "$MAIN_BIN" ] && [ -f "$MAIN_BIN" ]; then
           APP_SIZE=$(stat -f%z "$MAIN_BIN" 2>/dev/null || stat -c%s "$MAIN_BIN")

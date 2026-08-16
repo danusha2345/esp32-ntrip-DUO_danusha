@@ -274,6 +274,7 @@ void wait_for_network() {
 void wifi_init() {
     // Создание группы событий для синхронизации между WiFi задачами
     wifi_event_group = xEventGroupCreate();
+    ESP_ERROR_CHECK(wifi_event_group != NULL ? ESP_OK : ESP_ERR_NO_MEM);
     
     // Инициализация WiFi драйвера с настройками по умолчанию
     wifi_init_config_t wifi_init_config = WIFI_INIT_CONFIG_DEFAULT();
@@ -282,6 +283,7 @@ void wifi_init() {
 
     // Инициализация механизма переподключения с экспоненциальной задержкой
     delay_handle = retry_init(true, 5, 2000, 60000);  // Макс 5 попыток, старт 2с, макс 60с
+    ESP_ERROR_CHECK(delay_handle != NULL ? ESP_OK : ESP_ERR_NO_MEM);
 
     // SoftAP
     bool ap_enable = config_get_bool1(CONF_ITEM(KEY_CONFIG_WIFI_AP_ACTIVE));
@@ -292,7 +294,8 @@ void wifi_init() {
         esp_netif_ip_info_t ip_info_ap;
         config_get_primitive(CONF_ITEM(KEY_CONFIG_WIFI_AP_GATEWAY), &ip_info_ap.ip);
         ip_info_ap.gw = ip_info_ap.ip;
-        uint8_t subnet = config_get_u8(CONF_ITEM(KEY_CONFIG_WIFI_STA_SUBNET));
+        uint8_t subnet = config_get_u8(CONF_ITEM(KEY_CONFIG_WIFI_AP_SUBNET));
+        if (subnet == 0 || subnet > 30) subnet = 24;
         ip_info_ap.netmask.addr = esp_netif_htonl(0xffffffffu << (32u - subnet));
 
         esp_netif_dhcps_stop(esp_netif_ap);
@@ -301,8 +304,11 @@ void wifi_init() {
 
         config_ap.ap.max_connection = 4;
         size_t ap_ssid_len = sizeof(config_ap.ap.ssid);
-        config_get_str_blob(CONF_ITEM(KEY_CONFIG_WIFI_AP_SSID), &config_ap.ap.ssid, &ap_ssid_len);
-        ap_ssid_len--; // Remove null terminator from length
+        if (config_get_str_blob(CONF_ITEM(KEY_CONFIG_WIFI_AP_SSID), &config_ap.ap.ssid,
+                                &ap_ssid_len) != ESP_OK) {
+            config_ap.ap.ssid[0] = '\0';
+        }
+        ap_ssid_len = strnlen((char *) config_ap.ap.ssid, sizeof(config_ap.ap.ssid));
         config_ap.ap.ssid_len = ap_ssid_len;
         if (ap_ssid_len == 0) {
             // Generate a default AP SSID and store
@@ -313,9 +319,13 @@ void wifi_init() {
         }
         config_get_primitive(CONF_ITEM(KEY_CONFIG_WIFI_AP_SSID_HIDDEN), &config_ap.ap.ssid_hidden);
         size_t ap_password_len = sizeof(config_ap.ap.password);
-        config_get_str_blob(CONF_ITEM(KEY_CONFIG_WIFI_AP_PASSWORD), &config_ap.ap.password, &ap_password_len);
-        ap_password_len--; // Remove null terminator from length
+        if (config_get_str_blob(CONF_ITEM(KEY_CONFIG_WIFI_AP_PASSWORD), &config_ap.ap.password,
+                                &ap_password_len) != ESP_OK) {
+            config_ap.ap.password[0] = '\0';
+        }
+        ap_password_len = strnlen((char *) config_ap.ap.password, sizeof(config_ap.ap.password));
         config_get_primitive(CONF_ITEM(KEY_CONFIG_WIFI_AP_AUTH_MODE), &config_ap.ap.authmode);
+        if (ap_password_len < 8) config_ap.ap.authmode = WIFI_AUTH_OPEN;
 
         ESP_LOGI(TAG, "WIFI_AP_SSID: %s %s(%s)", config_ap.ap.ssid,
                 config_ap.ap.ssid_hidden ? "(hidden) " : "",
@@ -344,6 +354,7 @@ void wifi_init() {
             config_get_primitive(CONF_ITEM(KEY_CONFIG_WIFI_STA_IP), &ip_info_sta.ip);
             config_get_primitive(CONF_ITEM(KEY_CONFIG_WIFI_STA_GATEWAY), &ip_info_sta.gw);
             uint8_t subnet = config_get_u8(CONF_ITEM(KEY_CONFIG_WIFI_STA_SUBNET));
+            if (subnet == 0 || subnet > 30) subnet = 24;
             ip_info_sta.netmask.addr = esp_netif_htonl(0xffffffffu << (32u - subnet));
 
             esp_netif_dns_info_t dns_info_sta_main, dns_info_sta_backup;
@@ -357,12 +368,18 @@ void wifi_init() {
         }
 
         size_t sta_ssid_len = sizeof(config_sta.sta.ssid);
-        config_get_str_blob(CONF_ITEM(KEY_CONFIG_WIFI_STA_SSID), &config_sta.sta.ssid, &sta_ssid_len);
-        sta_ssid_len--; // Remove null terminator from length
+        if (config_get_str_blob(CONF_ITEM(KEY_CONFIG_WIFI_STA_SSID), &config_sta.sta.ssid,
+                                &sta_ssid_len) != ESP_OK) {
+            config_sta.sta.ssid[0] = '\0';
+        }
+        sta_ssid_len = strnlen((char *) config_sta.sta.ssid, sizeof(config_sta.sta.ssid));
         if (sta_ssid_len == 0) sta_enable = false;
         size_t sta_password_len = sizeof(config_sta.sta.password);
-        config_get_str_blob(CONF_ITEM(KEY_CONFIG_WIFI_STA_PASSWORD), &config_sta.sta.password, &sta_password_len);
-        sta_password_len--; // Remove null terminator from length
+        if (config_get_str_blob(CONF_ITEM(KEY_CONFIG_WIFI_STA_PASSWORD), &config_sta.sta.password,
+                                &sta_password_len) != ESP_OK) {
+            config_sta.sta.password[0] = '\0';
+        }
+        sta_password_len = strnlen((char *) config_sta.sta.password, sizeof(config_sta.sta.password));
         
         // Всегда используем режим All Channel Scan для максимального обнаружения сетей
         config_sta.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
@@ -414,11 +431,15 @@ void wifi_init() {
         ESP_ERROR_CHECK(esp_wifi_set_bandwidth(ESP_IF_WIFI_STA, WIFI_BW_HT20));
 
         // Keep track of connection for RSSI indicator, but suspend until connected
-        xTaskCreate(wifi_sta_status_task, "wifi_sta_status", 2048, NULL, TASK_PRIORITY_WIFI_STATUS, &sta_status_task);
+        ESP_ERROR_CHECK(xTaskCreate(wifi_sta_status_task, "wifi_sta_status", 2048, NULL,
+                                    TASK_PRIORITY_WIFI_STATUS, &sta_status_task) == pdPASS
+                        ? ESP_OK : ESP_ERR_NO_MEM);
         vTaskSuspend(sta_status_task);
 
         // Reconnect when disconnected
-        xTaskCreate(wifi_sta_reconnect_task, "wifi_sta_reconnect", 4096, NULL, TASK_PRIORITY_WIFI_STATUS, &sta_reconnect_task);
+        ESP_ERROR_CHECK(xTaskCreate(wifi_sta_reconnect_task, "wifi_sta_reconnect", 4096, NULL,
+                                    TASK_PRIORITY_WIFI_STATUS, &sta_reconnect_task) == pdPASS
+                        ? ESP_OK : ESP_ERR_NO_MEM);
         vTaskSuspend(sta_reconnect_task);
 
         config_color_t sta_led_color = config_get_color(CONF_ITEM(KEY_CONFIG_WIFI_STA_COLOR));

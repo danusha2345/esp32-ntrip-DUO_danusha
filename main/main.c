@@ -75,6 +75,11 @@ static char *reset_reason_name(esp_reset_reason_t reason);
 static void reset_button_task(void *pvParameters) {
     // Инициализация кнопки и очереди событий
     QueueHandle_t button_queue = button_init(PIN_BIT(BUTTON_GPIO));
+    if (button_queue == NULL) {
+        ESP_LOGE(TAG, "Reset button initialization failed");
+        vTaskDelete(NULL);
+        return;
+    }
     gpio_set_pull_mode(BUTTON_GPIO, GPIO_PULLUP_ONLY); // Подтягивающий резистор к VCC
     
     while (true) {
@@ -97,6 +102,16 @@ static void sntp_time_set_handler(struct timeval *tv) {
     ESP_LOGI(TAG, "Synced time from SNTP");
 }
 
+static void sntp_init_task(void *ctx) {
+    wait_for_ip();
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH);
+    esp_sntp_set_time_sync_notification_cb(sntp_time_set_handler);
+    esp_sntp_init();
+    vTaskDelete(NULL);
+}
+
 /// Главная функция приложения ESP32 NTRIP Duo
 /// Инициализирует все модули и запускает основные сервисы
 void app_main()
@@ -105,9 +120,10 @@ void app_main()
     status_led_init();
     // Добавление белого светодиода с плавным затуханием (старт системы)
     status_led_handle_t status_led = status_led_add(0xFFFFFF33, STATUS_LED_FADE, 250, 2500, 0);
+    ESP_ERROR_CHECK(status_led != NULL ? ESP_OK : ESP_ERR_NO_MEM);
 
     // Инициализация системы логирования
-    log_init();
+    ESP_ERROR_CHECK(log_init());
     esp_log_set_vprintf(log_vprintf);                         // Перенаправление логов
     // Установка уровней логирования (подавление избыточных сообщений)
     esp_log_level_set("gpio", ESP_LOG_WARN);
@@ -118,15 +134,21 @@ void app_main()
     // Проверка core dump после возможного краха системы
     core_dump_check();
 
-    // Создание задачи обработки кнопки сброса (приоритет определён в tasks.h)
-    xTaskCreate(reset_button_task, "reset_button", 4096, NULL, TASK_PRIORITY_RESET_BUTTON, NULL);
-
     // Инициализация статистики потоков данных
     stream_stats_init();
 
+    // Обработчики UART публикуют события сразу после запуска задачи, поэтому
+    // стандартный event loop должен существовать до uart_init().
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+
     // Инициализация системы конфигурации (NVS) и UART
-    config_init();
+    ESP_ERROR_CHECK(config_init());
     uart_init();
+
+    // Кнопка вызывает config_reset(), поэтому запускаем её только после NVS.
+    ESP_ERROR_CHECK(xTaskCreate(reset_button_task, "reset_button", 4096, NULL,
+                                TASK_PRIORITY_RESET_BUTTON, NULL) == pdPASS
+                    ? ESP_OK : ESP_ERR_NO_MEM);
 
     // Получение причины последнего сброса ESP32
     esp_reset_reason_t reset_reason = esp_reset_reason();
@@ -153,9 +175,6 @@ void app_main()
     ESP_LOGI(TAG, "║ Source: https://github.com/nebkat/esp32-xbee ║");
     ESP_LOGI(TAG, "╚══════════════════════════════════════════════╝");
 
-    // Создание основного цикла событий ESP-IDF
-    esp_event_loop_create_default();
-
     // Пауза 2.5 секунды, затем переключение светодиода в режим мигания
     vTaskDelay(pdMS_TO_TICKS(2500));
     status_led->interval = 100;                               // Интервал между миганиями: 100мс
@@ -175,37 +194,42 @@ void app_main()
     }
 
     // Инициализация сетевого стека ESP32
-    esp_netif_init();
+    ESP_ERROR_CHECK(esp_netif_init());
 
     // Инициализация WiFi (Station/AP режимы)
     wifi_init();
 
-    // Запуск веб-сервера для конфигурации
-    web_server_init();
-
     // Инициализация основных NTRIP серверов (двойной режим)
     ntrip_server_init();                                      // Первичный NTRIP сервер
     ntrip_server_2_init();                                    // Вторичный NTRIP сервер
+    ntrip_client_init();                                      // Приём RTCM от внешнего кастера
 
     // Инициализация дополнительных сетевых сервисов
     socket_server_init();                                     // TCP/UDP Socket сервер
     socket_client_init();                                     // TCP/UDP Socket клиент
 
-    // Инициализация логирования на SD карту
-    sd_logger_init();
+    // Не занимать SPI/GPIO, пока опциональное SD-логирование выключено.
+    if (config_get_bool1(CONF_ITEM(KEY_CONFIG_SD_LOGGING_ACTIVE))) {
+        esp_err_t sd_ret = sd_logger_init();
+        if (sd_ret != ESP_OK) {
+            ESP_LOGE(TAG, "SD logger initialization failed: %s", esp_err_to_name(sd_ret));
+        }
+    }
+
+    // Все stream_stats уже зарегистрированы; теперь web status может безопасно
+    // обходить стабильный список потоков.
+    web_server_init();
 
     // NMEA сообщение о завершении инициализации
     uart_nmea("$PESP,INIT,COMPLETE");
 
-    // Ожидание получения IP адреса (WiFi подключение)
-    wait_for_ip();
-
-    // Настройка и запуск SNTP клиента для синхронизации времени
-    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);             // Режим периодического опроса
-    esp_sntp_setservername(0, "pool.ntp.org");               // Публичный пул NTP серверов
-    esp_sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH);           // Плавная синхронизация времени
-    esp_sntp_set_time_sync_notification_cb(sntp_time_set_handler);  // Callback синхронизации
-    esp_sntp_init();                                          // Запуск SNTP клиента
+    // Не блокировать app_main в штатном AP-only режиме. SNTP стартует после
+    // получения адреса Station-интерфейсом.
+    if (config_get_bool1(CONF_ITEM(KEY_CONFIG_WIFI_STA_ACTIVE))) {
+        ESP_ERROR_CHECK(xTaskCreate(sntp_init_task, "sntp_init", 3072, NULL,
+                                    TASK_PRIORITY_INTERFACE, NULL) == pdPASS
+                        ? ESP_OK : ESP_ERR_NO_MEM);
+    }
 
 #ifdef DEBUG_HEAP
     // Режим отладки heap памяти - периодический вывод статистики использования

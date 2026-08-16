@@ -21,7 +21,9 @@
 
 #include <sys/queue.h>
 #include <freertos/task.h>
+#include <esp_err.h>
 #include <tasks.h>
+#include <string.h>
 
 #define RUNNING_AVERAGE_PERIOD 1000
 #define RUNNING_AVERAGE_ALPHA 0.8
@@ -43,12 +45,14 @@ struct stream_stats {
 };
 
 static SLIST_HEAD(stream_stats_list_t, stream_stats) stream_stats_list;
+static portMUX_TYPE stats_mux = portMUX_INITIALIZER_UNLOCKED;
 
 static void stream_stats_task(void *ctx) {
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(RUNNING_AVERAGE_PERIOD));
         stream_stats_handle_t stats;
         SLIST_FOREACH(stats, &stream_stats_list, next) {
+            portENTER_CRITICAL(&stats_mux);
             stats->rate_in = stats->rate_in * RUNNING_AVERAGE_ALPHA +
                     (double) stats->rate_in_period_count * (1.0 - RUNNING_AVERAGE_ALPHA) * RUNNING_AVERAGE_PERIOD_CORRECTION;
             stats->rate_out = stats->rate_out * RUNNING_AVERAGE_ALPHA +
@@ -56,31 +60,42 @@ static void stream_stats_task(void *ctx) {
 
             stats->rate_in_period_count = 0;
             stats->rate_out_period_count = 0;
+            portEXIT_CRITICAL(&stats_mux);
         }
     }
 }
 
 void stream_stats_init() {
     SLIST_INIT(&stream_stats_list);
-    xTaskCreate(stream_stats_task, "stream_stats_task", 2048, NULL, TASK_PRIORITY_STATS, NULL);
+    ESP_ERROR_CHECK(xTaskCreate(stream_stats_task, "stream_stats_task", 2048, NULL,
+                                TASK_PRIORITY_STATS, NULL) == pdPASS
+                    ? ESP_OK : ESP_ERR_NO_MEM);
 }
 
 stream_stats_handle_t stream_stats_new(const char *name) {
     stream_stats_handle_t new = calloc(1, sizeof(struct stream_stats));
+    if (!new) return NULL;
     new->name = name;
+    portENTER_CRITICAL(&stats_mux);
     SLIST_INSERT_HEAD(&stream_stats_list, new, next);
+    portEXIT_CRITICAL(&stats_mux);
 
     return new;
 }
 
 void stream_stats_increment(stream_stats_handle_t stats, uint32_t in, uint32_t out) {
+    if (!stats) return;
+    portENTER_CRITICAL(&stats_mux);
     stats->total_in += in;
     stats->total_out += out;
     stats->rate_in_period_count += in;
     stats->rate_out_period_count += out;
+    portEXIT_CRITICAL(&stats_mux);
 }
 
 void stream_stats_values(stream_stats_handle_t stats, stream_stats_values_t *values) {
+    if (!stats || !values) return;
+    portENTER_CRITICAL(&stats_mux);
     *values = (stream_stats_values_t) {
             .name = stats->name,
             .total_in = stats->total_in,
@@ -88,6 +103,7 @@ void stream_stats_values(stream_stats_handle_t stats, stream_stats_values_t *val
             .rate_in = stats->rate_in,
             .rate_out = stats->rate_out
     };
+    portEXIT_CRITICAL(&stats_mux);
 }
 
 stream_stats_handle_t stream_stats_first() {
@@ -101,7 +117,7 @@ stream_stats_handle_t stream_stats_next(stream_stats_handle_t stats) {
 stream_stats_handle_t stream_stats_get(const char *name) {
     stream_stats_handle_t stats;
     SLIST_FOREACH(stats, &stream_stats_list, next) {
-        if (stats->name == name) {
+        if (strcmp(stats->name, name) == 0) {
             return stats;
         }
     }

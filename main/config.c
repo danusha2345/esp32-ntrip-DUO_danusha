@@ -41,7 +41,7 @@
 #ifdef CONFIG_IDF_TARGET_ESP32
 #define DEFAULT_UART_TX_PIN GPIO_NUM_1      // Стандартный ESP32: TX - GPIO1
 #define DEFAULT_UART_RX_PIN GPIO_NUM_3      // Стандартный ESP32: RX - GPIO3
-#define DEFAULT_UART_RTS_PIN GPIO_NUM_14    // Стандартный ESP32: RTS - GPIO14
+#define DEFAULT_UART_RTS_PIN GPIO_NUM_32    // Не конфликтует с SPI SD (CLK=GPIO14)
 #define DEFAULT_UART_CTS_PIN GPIO_NUM_33    // Стандартный ESP32: CTS - GPIO33
 #elif defined(CONFIG_IDF_TARGET_ESP32C3)
 #define DEFAULT_UART_TX_PIN GPIO_NUM_21     // ESP32-C3: TX - GPIO21
@@ -52,12 +52,12 @@
 #define DEFAULT_UART_TX_PIN GPIO_NUM_43     // ESP32-S3: TX - GPIO43
 #define DEFAULT_UART_RX_PIN GPIO_NUM_44     // ESP32-S3: RX - GPIO44
 #define DEFAULT_UART_RTS_PIN GPIO_NUM_16    // ESP32-S3: RTS - GPIO16
-#define DEFAULT_UART_CTS_PIN GPIO_NUM_15    // ESP32-S3: CTS - GPIO15
+#define DEFAULT_UART_CTS_PIN GPIO_NUM_17    // Не конфликтует с SPI SD (MOSI=GPIO15)
 #elif defined(CONFIG_IDF_TARGET_ESP32C6)
 #define DEFAULT_UART_TX_PIN GPIO_NUM_16     // ESP32-C6: TX - GPIO16
 #define DEFAULT_UART_RX_PIN GPIO_NUM_17     // ESP32-C6: RX - GPIO17
-#define DEFAULT_UART_RTS_PIN GPIO_NUM_4     // ESP32-C6: RTS - GPIO4
-#define DEFAULT_UART_CTS_PIN GPIO_NUM_5     // ESP32-C6: CTS - GPIO5
+#define DEFAULT_UART_RTS_PIN GPIO_NUM_22    // Не конфликтует со status LED GPIO4
+#define DEFAULT_UART_CTS_PIN GPIO_NUM_23    // Не конфликтует со status LED GPIO5
 #else
 // Значения по умолчанию для неподдерживаемых чипов
 #define DEFAULT_UART_TX_PIN GPIO_NUM_1
@@ -90,26 +90,6 @@ const config_item_t CONFIG_ITEMS[] = {
                 .type = CONFIG_ITEM_TYPE_STRING,
                 .secret = true,                             // Секретное поле - не показывать в веб-интерфейсе
                 .def.str = ""                               // Пустой по умолчанию
-        },
-
-        // ==================== Параметры Bluetooth ====================
-        {
-                .key = KEY_CONFIG_BLUETOOTH_ACTIVE,         // Включить/выключить Bluetooth
-                .type = CONFIG_ITEM_TYPE_BOOL,
-                .def.bool1 = false                          // По умолчанию отключен
-        }, {
-                .key = KEY_CONFIG_BLUETOOTH_DEVICE_NAME,    // Имя Bluetooth устройства
-                .type = CONFIG_ITEM_TYPE_STRING,
-                .def.str = ""                               // Пустое по умолчанию
-        }, {
-                .key = KEY_CONFIG_BLUETOOTH_DEVICE_DISCOVERABLE, // Видимость Bluetooth устройства
-                .type = CONFIG_ITEM_TYPE_BOOL,
-                .def.bool1 = true                           // По умолчанию видимое
-        }, {
-                .key = KEY_CONFIG_BLUETOOTH_PIN_CODE,       // PIN-код для сопряжения
-                .type = CONFIG_ITEM_TYPE_UINT16,
-                .secret = true,                             // Секретное поле
-                .def.uint16 = 1234                          // Стандартный PIN по умолчанию
         },
 
         // ==================== ПЕРВИЧНЫЙ NTRIP СЕРВЕР ====================
@@ -495,7 +475,9 @@ esp_err_t config_init() {
 esp_err_t config_reset() {
     uart_nmea("$PESP,CFG,RESET");                   // NMEA сообщение о сбросе конфигурации
 
-    return nvs_erase_all(config_handle);            // Полная очистка пространства конфигурации
+    esp_err_t err = nvs_erase_all(config_handle);   // Полная очистка пространства конфигурации
+    if (err != ESP_OK) return err;
+    return nvs_commit(config_handle);
 }
 
 /// Получение 8-битного целого значения из конфигурации
@@ -638,7 +620,12 @@ esp_err_t config_get_str_blob_alloc(const config_item_t *item, void **out_value)
         ESP_LOGE(TAG, "Failed to allocate %d bytes for config item %s", length, item->key);
         return ESP_ERR_NO_MEM;
     }
-    return config_get_str_blob(item, *out_value, &length);
+    ret = config_get_str_blob(item, *out_value, &length);
+    if (ret != ESP_OK) {
+        free(*out_value);
+        *out_value = NULL;
+    }
+    return ret;
 }
 
 esp_err_t config_get_str_blob(const config_item_t *item, void *out_value, size_t *length) {
@@ -680,7 +667,11 @@ static void config_restart_task(void *pvParameters) {
 void config_restart() {
     uart_nmea("$PESP,CFG,RESTARTING");
 
-    xTaskCreate(config_restart_task, "config_restart_task", 4096, NULL, TASK_PRIORITY_MAX, NULL);
+    if (xTaskCreate(config_restart_task, "config_restart_task", 4096, NULL,
+                    TASK_PRIORITY_MAX, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create restart task; restarting immediately");
+        esp_restart();
+    }
 }
 
 // Socket configuration helper functions

@@ -9,6 +9,8 @@
 #define SOCKET_CLIENT_H
 
 #include "esp_err.h"
+#include <stddef.h>
+#include <stdint.h>
 #include <time.h>
 #include <stdbool.h>
 

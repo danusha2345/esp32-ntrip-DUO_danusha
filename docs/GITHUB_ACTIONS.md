@@ -42,36 +42,23 @@ esp32-ntrip-duo-esp32-YYYYMMDD.tar.gz
 esp32-ntrip-duo-esp32c3-YYYYMMDD.tar.gz
 ├── bootloader.bin
 ├── partition-table.bin  
-├── esp32-xbee.bin
+├── <target>-ntrip-duo.bin
 ├── www.bin
-├── esp32-xbee.elf
-├── flash.sh (Linux/Mac)
-├── flash.bat (Windows)
+├── <target>-ntrip-duo.elf
+├── <target>-ntrip-duo-merged.bin
 ├── download.conf (Flash Download Tool)
 └── README.md
 ```
-
-### 3. Documentation Updates (`docs.yml`)
-**Триггеры:** Push в master/main, изменения в коде, ручной запуск
-
-**Назначение:** Автоматическое обновление документации
-
-**Функции:**
-- 📚 Генерация документации по GPIO пинам
-- ✨ Обновление списка функций
-- 🏷️ Добавление badges в README
-- 📖 Создание quick start guide
-- 🔄 Автоматический коммит изменений
 
 ## 🚀 Как создать релиз
 
 ### Автоматический релиз (рекомендуется)
 ```bash
 # Создать тег с версией
-git tag v2024.01.15
+jj tag set v2026.08.16 -r @-
 
 # Отправить тег в репозиторий  
-git push origin v2024.01.15
+jj git push --tag v2026.08.16
 
 # GitHub Actions автоматически:
 # 1. Соберёт прошивки для всех платформ
@@ -107,7 +94,8 @@ git push origin v2024.01.15
 
 ```bash
 # Подготовить ESP-IDF окружение
-source $IDF_PATH/export.sh
+export IDF_TOOLS_PATH=/home/danik/storage/espressif
+source /home/danik/storage/esp/esp-idf-v5.4.4/export.sh
 
 # Запустить сборку всех платформ
 ./build_all.sh
@@ -132,7 +120,7 @@ source $IDF_PATH/export.sh
 Workflows используют только стандартный `GITHUB_TOKEN`
 
 ### Настройки
-- **ESP-IDF версия**: v5.2 (конфигурируется в workflows)
+- **ESP-IDF версия**: v5.4.4
 - **Целевые платформы**: esp32, esp32c3, esp32s3, esp32c6
 - **Режим сборки**: Release оптимизация
 
@@ -141,7 +129,7 @@ Workflows используют только стандартный `GITHUB_TOKEN
 
 ```yaml
 # Изменить версию ESP-IDF
-esp_idf_version: v5.3
+container: espressif/idf:v5.4.4
 
 # Добавить новую платформу
 matrix:

@@ -31,8 +31,9 @@ static const char *TAG = "socket_server";
 #define MAX_CLIENTS 10
 #define SOCKET_BUFFER_SIZE 1024
 #define SOCKET_SERVER_STACK_SIZE 4096
+#define UDP_CLIENT_TIMEOUT_SECONDS 60
 
-static bool server_running = false;
+static volatile bool server_running = false;
 static TaskHandle_t server_task_handle = NULL;
 static int tcp_server_socket = -1;
 static int udp_server_socket = -1;
@@ -44,6 +45,7 @@ typedef struct {
     uint32_t bytes_sent;
     uint32_t bytes_received;
     time_t connect_time;
+    time_t last_activity;
 } socket_client_t;
 
 static socket_client_t clients[MAX_CLIENTS];
@@ -55,9 +57,16 @@ static int socket_tcp_init(void);
 static int socket_udp_init(void);
 static void socket_server_task(void *params);
 static int socket_tcp_accept(int server_socket);
-static int socket_udp_accept(int server_socket);
+static int socket_udp_accept(const struct sockaddr_in6 *source_addr);
 static void socket_client_close(int client_index);
 static void socket_send_to_all_clients(const char *data, size_t length);
+
+static void socket_server_uart_handler(void *handler_args, esp_event_base_t base,
+                                       int32_t length, void *data) {
+    if (server_running && length > 0) {
+        socket_send_to_all_clients(data, (size_t) length);
+    }
+}
 
 static int socket_init(int type, int port) {
     int sock = socket(AF_INET6, type, 0);
@@ -96,7 +105,7 @@ static int socket_tcp_init(void) {
         return -1;
     }
 
-    int err = listen(sock, 1);
+    int err = listen(sock, MAX_CLIENTS);
     if (err != 0) {
         ESP_LOGE(TAG, "Error occurred during listen: errno %d", errno);
         close(sock);
@@ -127,6 +136,9 @@ static int socket_tcp_accept(int server_socket) {
         return -1;
     }
 
+    struct timeval timeout = {.tv_sec = 1, .tv_usec = 0};
+    setsockopt(client_socket, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+
     // Find empty slot for client
     xSemaphoreTake(clients_mutex, portMAX_DELAY);
     for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -137,6 +149,7 @@ static int socket_tcp_accept(int server_socket) {
             clients[i].bytes_sent = 0;
             clients[i].bytes_received = 0;
             clients[i].connect_time = time(NULL);
+            clients[i].last_activity = clients[i].connect_time;
             
             char addr_str[128];
             inet6_ntoa_r(source_addr.sin6_addr, addr_str, sizeof(addr_str) - 1);
@@ -153,22 +166,13 @@ static int socket_tcp_accept(int server_socket) {
     return -1;
 }
 
-static int socket_udp_accept(int server_socket) {
-    struct sockaddr_in6 source_addr;
-    socklen_t addr_len = sizeof(source_addr);
-    char buffer[1];
-    
-    int len = recvfrom(server_socket, buffer, sizeof(buffer), MSG_PEEK, 
-                       (struct sockaddr*)&source_addr, &addr_len);
-    if (len < 0) {
-        return -1;
-    }
-
+static int socket_udp_accept(const struct sockaddr_in6 *source_addr) {
     // Check if client already exists
     xSemaphoreTake(clients_mutex, portMAX_DELAY);
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (clients[i].connected && 
-            memcmp(&clients[i].addr, &source_addr, sizeof(source_addr)) == 0) {
+            memcmp(&clients[i].addr, source_addr, sizeof(*source_addr)) == 0) {
+            clients[i].last_activity = time(NULL);
             xSemaphoreGive(clients_mutex);
             return i;
         }
@@ -177,15 +181,16 @@ static int socket_udp_accept(int server_socket) {
     // Find empty slot for new UDP client
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (!clients[i].connected) {
-            clients[i].socket = server_socket;  // UDP uses server socket
-            clients[i].addr = source_addr;
+            clients[i].socket = udp_server_socket;  // UDP uses server socket
+            clients[i].addr = *source_addr;
             clients[i].connected = true;
             clients[i].bytes_sent = 0;
             clients[i].bytes_received = 0;
             clients[i].connect_time = time(NULL);
+            clients[i].last_activity = clients[i].connect_time;
             
             char addr_str[128];
-            inet6_ntoa_r(source_addr.sin6_addr, addr_str, sizeof(addr_str) - 1);
+            inet6_ntoa_r(source_addr->sin6_addr, addr_str, sizeof(addr_str) - 1);
             ESP_LOGI(TAG, "UDP client connected from %s, slot %d", addr_str, i);
             
             xSemaphoreGive(clients_mutex);
@@ -204,7 +209,7 @@ static void socket_client_close(int client_index) {
     }
 
     xSemaphoreTake(clients_mutex, portMAX_DELAY);
-    if (clients[client_index].connected) {
+    if (clients[client_index].socket >= 0) {
         ESP_LOGI(TAG, "Closing client %d", client_index);
         
         if (clients[client_index].socket != tcp_server_socket && 
@@ -213,6 +218,7 @@ static void socket_client_close(int client_index) {
         }
         
         memset(&clients[client_index], 0, sizeof(socket_client_t));
+        clients[client_index].socket = -1;
     }
     xSemaphoreGive(clients_mutex);
 }
@@ -226,15 +232,16 @@ static void socket_send_to_all_clients(const char *data, size_t length) {
             
             if (clients[i].socket == udp_server_socket) {
                 // UDP client
-                sent = sendto(clients[i].socket, data, length, 0,
+                sent = sendto(clients[i].socket, data, length, MSG_DONTWAIT,
                             (struct sockaddr*)&clients[i].addr, sizeof(clients[i].addr));
             } else {
                 // TCP client
-                sent = send(clients[i].socket, data, length, 0);
+                sent = send(clients[i].socket, data, length, MSG_DONTWAIT);
             }
             
-            if (sent < 0) {
-                ESP_LOGE(TAG, "Send failed to client %d: errno %d", i, errno);
+            if (sent < 0 || (size_t) sent != length) {
+                ESP_LOGE(TAG, "Incomplete send to client %d (%d/%u bytes): errno %d",
+                         i, sent, (unsigned) length, errno);
                 clients[i].connected = false;  // Mark for cleanup
             } else {
                 clients[i].bytes_sent += sent;
@@ -295,11 +302,6 @@ static void socket_server_task(void *params) {
 
         if (activity == 0) {
             // Timeout - check for UART data to send
-            size_t uart_data_len = uart_read_bytes(UART_NUM_0, (uint8_t*)buffer, 
-                                                   sizeof(buffer) - 1, 10 / portTICK_PERIOD_MS);
-            if (uart_data_len > 0) {
-                socket_send_to_all_clients(buffer, uart_data_len);
-            }
             continue;
         }
 
@@ -319,13 +321,16 @@ static void socket_server_task(void *params) {
                 buffer[len] = 0;
                 
                 // Find or create UDP client
-                int client_idx = socket_udp_accept(udp_server_socket);
+                int client_idx = socket_udp_accept(&source_addr);
                 if (client_idx >= 0) {
+                    xSemaphoreTake(clients_mutex, portMAX_DELAY);
                     clients[client_idx].bytes_received += len;
+                    clients[client_idx].last_activity = time(NULL);
+                    xSemaphoreGive(clients_mutex);
                 }
                 
                 // Forward to UART
-                uart_write_bytes(UART_NUM_0, buffer, len);
+                uart_write(buffer, len);
                 ESP_LOGD(TAG, "UDP data forwarded to UART: %d bytes", len);
             }
         }
@@ -341,9 +346,10 @@ static void socket_server_task(void *params) {
                 if (len > 0) {
                     buffer[len] = 0;
                     clients[i].bytes_received += len;
+                    clients[i].last_activity = time(NULL);
                     
                     // Forward to UART
-                    uart_write_bytes(UART_NUM_0, buffer, len);
+                    uart_write(buffer, len);
                     ESP_LOGD(TAG, "TCP client %d data forwarded to UART: %d bytes", i, len);
                 } else if (len == 0) {
                     ESP_LOGI(TAG, "TCP client %d disconnected", i);
@@ -357,17 +363,17 @@ static void socket_server_task(void *params) {
         xSemaphoreGive(clients_mutex);
 
         // Clean up disconnected clients
+        time_t now = time(NULL);
         for (int i = 0; i < MAX_CLIENTS; i++) {
-            if (!clients[i].connected && clients[i].socket > 0) {
-                socket_client_close(i);
+            bool should_close;
+            xSemaphoreTake(clients_mutex, portMAX_DELAY);
+            if (clients[i].connected && clients[i].socket == udp_server_socket &&
+                now - clients[i].last_activity >= UDP_CLIENT_TIMEOUT_SECONDS) {
+                clients[i].connected = false;
             }
-        }
-
-        // Check for UART data to send to clients
-        size_t uart_data_len = uart_read_bytes(UART_NUM_0, (uint8_t*)buffer, 
-                                               sizeof(buffer) - 1, 10 / portTICK_PERIOD_MS);
-        if (uart_data_len > 0) {
-            socket_send_to_all_clients(buffer, uart_data_len);
+            should_close = !clients[i].connected && clients[i].socket >= 0;
+            xSemaphoreGive(clients_mutex);
+            if (should_close) socket_client_close(i);
         }
 
         vTaskDelay(10 / portTICK_PERIOD_MS);
@@ -412,6 +418,14 @@ esp_err_t socket_server_init(void) {
 
     // Initialize client array
     memset(clients, 0, sizeof(clients));
+    for (int i = 0; i < MAX_CLIENTS; i++) clients[i].socket = -1;
+
+    if (!is_tcp_server_enabled() && !is_udp_server_enabled()) {
+        ESP_LOGE(TAG, "Socket server enabled but both TCP and UDP are disabled");
+        vSemaphoreDelete(clients_mutex);
+        clients_mutex = NULL;
+        return ESP_ERR_INVALID_STATE;
+    }
 
     // Initialize TCP server if enabled
     if (is_tcp_server_enabled()) {
@@ -439,6 +453,7 @@ esp_err_t socket_server_init(void) {
 
     // Start server task
     server_running = true;
+    uart_register_read_handler(socket_server_uart_handler);
     BaseType_t ret = xTaskCreate(socket_server_task, "socket_server", 
                                 SOCKET_SERVER_STACK_SIZE, NULL, 5, &server_task_handle);
     
@@ -460,9 +475,17 @@ esp_err_t socket_server_deinit(void) {
     ESP_LOGI(TAG, "Stopping socket server");
     server_running = false;
 
-    // Wait for task to finish
+    // select() wakes at least once per second; do not delete the mutex while
+    // the worker can still be using it.
+    for (int i = 0; server_task_handle && i < 150; i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    uart_unregister_read_handler(socket_server_uart_handler);
+
     if (server_task_handle) {
-        vTaskDelay(100 / portTICK_PERIOD_MS);
+        ESP_LOGE(TAG, "Socket server task did not stop in time");
+        return ESP_ERR_TIMEOUT;
     }
 
     if (clients_mutex) {

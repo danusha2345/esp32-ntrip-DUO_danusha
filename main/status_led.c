@@ -104,9 +104,15 @@
 static SLIST_HEAD(status_led_color_list_t, status_led_color_t) status_led_colors_list;
 
 static TaskHandle_t led_task;
+static SemaphoreHandle_t list_mutex;
+static SemaphoreHandle_t ledc_mutex;
 
 void status_led_clear() {
-
+    if (!list_mutex) return;
+    xSemaphoreTake(list_mutex, portMAX_DELAY);
+    status_led_handle_t color;
+    SLIST_FOREACH(color, &status_led_colors_list, next) color->remove = true;
+    xSemaphoreGive(list_mutex);
 }
 
 status_led_handle_t status_led_add(uint32_t rgba, status_led_flashing_mode_t flashing_mode, uint32_t interval, uint32_t duration, uint8_t expire) {
@@ -116,6 +122,7 @@ status_led_handle_t status_led_add(uint32_t rgba, status_led_flashing_mode_t fla
     uint8_t alpha = rgba & 0xFFu;
 
     status_led_handle_t color = calloc(1, sizeof(struct status_led_color_t));
+    if (!color) return NULL;
     color->red = (red * alpha) / 0xFF;
     color->green = (green * alpha) / 0xFF;
     color->blue = (blue * alpha) / 0xFF;
@@ -127,6 +134,7 @@ status_led_handle_t status_led_add(uint32_t rgba, status_led_flashing_mode_t fla
 
     color->active = true;
 
+    xSemaphoreTake(list_mutex, portMAX_DELAY);
     // Insert at tail
     if (SLIST_EMPTY(&status_led_colors_list)) {
         SLIST_INSERT_HEAD(&status_led_colors_list, color, next);
@@ -138,6 +146,7 @@ status_led_handle_t status_led_add(uint32_t rgba, status_led_flashing_mode_t fla
             }
         }
     }
+    xSemaphoreGive(list_mutex);
 
     vTaskResume(led_task);
 
@@ -150,8 +159,10 @@ void status_led_remove(status_led_handle_t color) {
 }
 
 static void status_led_channel_set(ledc_channel_t channel, uint8_t value) {
+    xSemaphoreTake(ledc_mutex, portMAX_DELAY);
     ledc_set_duty(LEDC_SPEED_MODE, channel, value);
     ledc_update_duty(LEDC_SPEED_MODE, channel);
+    xSemaphoreGive(ledc_mutex);
 }
 
 static void status_led_set(uint8_t red, uint8_t green, uint8_t blue) {
@@ -161,8 +172,10 @@ static void status_led_set(uint8_t red, uint8_t green, uint8_t blue) {
 }
 
 static void status_led_channel_fade(ledc_channel_t channel, uint8_t value, int max_fade_time_ms) {
+    xSemaphoreTake(ledc_mutex, portMAX_DELAY);
     ledc_set_fade_with_time(LEDC_SPEED_MODE, channel, value, max_fade_time_ms);
     ledc_fade_start(LEDC_SPEED_MODE, channel, LEDC_FADE_NO_WAIT);
+    xSemaphoreGive(ledc_mutex);
 }
 
 static void status_led_fade(uint8_t red, uint8_t green, uint8_t blue, int max_fade_time_ms) {
@@ -199,8 +212,13 @@ static void status_led_show(status_led_handle_t color) {
 
 static void status_led_task(void *pvParameters) {
     while (true) {
+        xSemaphoreTake(list_mutex, portMAX_DELAY);
         // Wait for a color
-        if (SLIST_EMPTY(&status_led_colors_list)) vTaskSuspend(NULL);
+        if (SLIST_EMPTY(&status_led_colors_list)) {
+            xSemaphoreGive(list_mutex);
+            vTaskSuspend(NULL);
+            continue;
+        }
 
         status_led_handle_t color, color_tmp;
         SLIST_FOREACH_SAFE(color, &status_led_colors_list, next, color_tmp) {
@@ -212,12 +230,20 @@ static void status_led_task(void *pvParameters) {
             }
 
             // Show color
-            if (color->active) status_led_show(color);
+            bool active = color->active;
+            xSemaphoreGive(list_mutex);
+            if (active) status_led_show(color);
+            xSemaphoreTake(list_mutex, portMAX_DELAY);
         }
+        xSemaphoreGive(list_mutex);
     }
 }
 
 void status_led_init() {
+    list_mutex = xSemaphoreCreateMutex();
+    ledc_mutex = xSemaphoreCreateMutex();
+    ESP_ERROR_CHECK(list_mutex && ledc_mutex ? ESP_OK : ESP_ERR_NO_MEM);
+
     ledc_timer_config_t ledc_timer = {
             .duty_resolution = LEDC_TIMER_8_BIT,
             .freq_hz = STATUS_LED_FREQ,
@@ -262,7 +288,9 @@ void status_led_init() {
 
     ledc_fade_func_install(0);
 
-    xTaskCreate(status_led_task, "status_led", 2048, NULL, TASK_PRIORITY_STATUS_LED, &led_task);
+    ESP_ERROR_CHECK(xTaskCreate(status_led_task, "status_led", 2048, NULL,
+                                TASK_PRIORITY_STATUS_LED, &led_task) == pdPASS
+                    ? ESP_OK : ESP_ERR_NO_MEM);
 }
 
 void rssi_led_set(uint8_t value) {

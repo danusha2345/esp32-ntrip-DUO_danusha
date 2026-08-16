@@ -65,6 +65,7 @@ retry_delay_handle_t retry_init(bool first_instant, uint8_t short_count, int sho
 }
 
 int retry_delay(retry_delay_handle_t handle) {
+    if (!handle) return 0;
     int attempts = handle->attempts;
     int delay;
     if (attempts == 0 && handle->first_instant) {
@@ -92,5 +93,6 @@ int retry_delay(retry_delay_handle_t handle) {
 }
 
 void retry_reset(retry_delay_handle_t handle) {
+    if (!handle) return;
     handle->attempts = 0;
 }

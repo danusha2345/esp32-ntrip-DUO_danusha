@@ -63,12 +63,6 @@ typedef struct config_item {
 #define KEY_CONFIG_ADMIN_USERNAME "adm_user"
 #define KEY_CONFIG_ADMIN_PASSWORD "adm_pass"
 
-// Bluetooth
-#define KEY_CONFIG_BLUETOOTH_ACTIVE "bt_active"
-#define KEY_CONFIG_BLUETOOTH_DEVICE_NAME "bt_dev_name"
-#define KEY_CONFIG_BLUETOOTH_DEVICE_DISCOVERABLE "bt_dev_vis"
-#define KEY_CONFIG_BLUETOOTH_PIN_CODE "bt_pin_code"
-
 // NTRIP
 #define KEY_CONFIG_NTRIP_SERVER_ACTIVE "ntr_srv_active"
 #define KEY_CONFIG_NTRIP_SERVER_COLOR "ntr_srv_color"

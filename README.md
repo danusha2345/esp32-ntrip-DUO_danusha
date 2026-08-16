@@ -13,12 +13,12 @@ ESP32 NTRIP Duo is made with [ESP-IDF](https://github.com/espressif/esp-idf). It
 
 In this version Installation is simplified, with just a single bin file. You can use ESPHome web flasher https://web.esphome.io/ just connect your ESP32 dev board to PC, select connect, cho0se correct COM port, connect and install. On popup choose bin file and click install.
 
-This software can run on ESP32 WROOM type. Now added ESP32S3, ESP32C3, ESP32S2  Just choose correct bin file!
-For ESP32S2 if ESPHome is not connecting (it didn't with S2mini) You can use https://tasmota.github.io/install/ to install with single bin file.
+This software builds for ESP32, ESP32-C3, ESP32-S3 and ESP32-C6. Choose the firmware matching the chip.
 ## Features
 - **WiFi Station & Hotspot** - Connect to existing WiFi network or create your own access point
 - **Web Interface** - Complete configuration through browser-based interface
 - **Dual NTRIP Servers** - Simultaneous connection to two NTRIP services (e.g., Onocoy and RTK Direct)
+- **NTRIP Client** - Receive RTCM corrections and forward them to the configured UART
 - **TCP/UDP Socket Server** - Host socket services for client connections
 - **TCP/UDP Socket Client** - Connect to external socket servers
 - **UART Configuration** - Full control over serial communication parameters
@@ -29,7 +29,7 @@ For ESP32S2 if ESPHome is not connecting (it didn't with S2mini) You can use htt
 
 
 ## Help
-Now It can be compiled using ESP-IDF 5.4. (with some depreciation comments)
+The tested toolchain is ESP-IDF 5.4.4.
 
 To install the latest firmware use ESPHome web Flasher https://web.esphome.io/
 
@@ -38,7 +38,7 @@ Here is installation video https://youtu.be/33Mu5EV7fOE?si=J6kwCt6bbmIu7HnS
 It is still work in progress!!!
 
 ## Pinout
-By default it is set for UART0 TX gpio1, RX gpio3 including ESP32S3
+Default UART0 pins depend on the target; see the table below.
 
 LED with common positive and low output:
 
@@ -53,21 +53,22 @@ ESP32S3: gpio4 Red, gpio5 Green, gpio6 Blue
 1. Go to [Releases](https://github.com/danusha2345/esp32-ntrip-DUO_danusha/releases)
 2. Download the appropriate firmware for your ESP32 variant:
    - `esp32-ntrip-duo-esp32-*.tar.gz` for ESP32
+   - `esp32-ntrip-duo-esp32c3-*.tar.gz` for ESP32-C3
    - `esp32-ntrip-duo-esp32s3-*.tar.gz` for ESP32-S3  
    - `esp32-ntrip-duo-esp32c6-*.tar.gz` for ESP32-C6
 3. Extract and follow the included README for flashing instructions
 
 ### 🔧 Build from Source
 ```bash
-git clone https://github.com/danusha2345/esp32-ntrip-DUO_danusha.git
+jj git clone https://github.com/danusha2345/esp32-ntrip-DUO_danusha.git
 cd esp32-ntrip-DUO_danusha
-git submodule update --init --recursive
 
 # Setup ESP-IDF (if not already done)
-. $HOME/esp/esp-idf/export.sh
+export IDF_TOOLS_PATH=/home/danik/storage/espressif
+source /home/danik/storage/esp/esp-idf-v5.4.4/export.sh
 
 # Build for your target
-idf.py set-target esp32     # or esp32s3, esp32c6
+idf.py set-target esp32     # or esp32c3, esp32s3, esp32c6
 idf.py build
 idf.py flash
 ```
@@ -88,8 +89,16 @@ idf.py flash
 
 ### Pin Connections
 
-**UART (Default):**
-- TX: GPIO1, RX: GPIO3 (all variants)
+**UART0 (Default):**
+
+| Target | TX | RX | RTS | CTS |
+|---|---:|---:|---:|---:|
+| ESP32 | GPIO1 | GPIO3 | GPIO32 | GPIO33 |
+| ESP32-C3 | GPIO21 | GPIO20 | GPIO5 | GPIO6 |
+| ESP32-S3 | GPIO43 | GPIO44 | GPIO16 | GPIO17 |
+| ESP32-C6 | GPIO16 | GPIO17 | GPIO22 | GPIO23 |
+
+RTS/CTS pins are only assigned when the corresponding hardware flow-control option is enabled.
 
 **Status LED (Common Anode RGB):**
 - **ESP32**: Red=GPIO21, Green=GPIO22, Blue=GPIO23
@@ -136,7 +145,7 @@ The firmware includes full TCP/UDP socket functionality:
 - Default WiFi AP name: **ntrip-DUO_danusha**
 - Default WiFi AP: **Open network (no password)**
 - Default web interface: **http://192.168.4.1**
-- Compatible with ESP-IDF 5.4 (with some deprecation warnings)
+- Tested with ESP-IDF 5.4.4
 - Project is under active development
 
 ## 📄 License

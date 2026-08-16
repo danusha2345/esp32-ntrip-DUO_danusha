@@ -31,13 +31,14 @@ echo -e "${GREEN}Build Date: $DATE${NC}"
 echo
 
 # Create build output directory
-mkdir -p $BUILD_DIR
-rm -rf $BUILD_DIR/*
+mkdir -p "$BUILD_DIR"
+find "${BUILD_DIR:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 
 # Function to build for a specific target
 build_target() {
     local target=$1
-    local target_upper=$(echo $target | tr '[:lower:]' '[:upper:]')
+    local target_upper
+    target_upper=$(echo "$target" | tr '[:lower:]' '[:upper:]')
     
     echo -e "${YELLOW}Building for $target_upper...${NC}"
     echo -e "${YELLOW}=========================${NC}"
@@ -57,7 +58,7 @@ build_target() {
     
     # Set target
     echo -e "${BLUE}Setting target to $target...${NC}"
-    idf.py set-target $target
+    idf.py set-target "$target"
     
     # Copy target-specific sdkconfig if exists
     if [ -f "sdkconfig.$target" ]; then
@@ -78,20 +79,20 @@ build_target() {
         cp build/partition_table/partition-table.bin "$BUILD_DIR/$target/"
         
         # Find the main firmware files (project name varies by target)
-        MAIN_BIN=$(find build/ -maxdepth 1 -name "$target-ntrip-duo.bin" -o -name "esp32-ntrip-duo.bin" | head -1)
-        MAIN_ELF=$(find build/ -maxdepth 1 -name "$target-ntrip-duo.elf" -o -name "esp32-ntrip-duo.elf" | head -1)
+        MAIN_BIN=$(find build/ -maxdepth 1 \( -name "$target-ntrip-duo.bin" -o -name "esp32-ntrip-duo.bin" \) | head -1)
+        MAIN_ELF=$(find build/ -maxdepth 1 \( -name "$target-ntrip-duo.elf" -o -name "esp32-ntrip-duo.elf" \) | head -1)
         MAIN_BIN_NAME=$(basename "$MAIN_BIN")
         
         if [ -n "$MAIN_BIN" ]; then
             cp "$MAIN_BIN" "$BUILD_DIR/$target/"
-            echo -e "${GREEN}  Copied main firmware: $(basename $MAIN_BIN)${NC}"
+            echo -e "${GREEN}  Copied main firmware: $(basename "$MAIN_BIN")${NC}"
         else
             echo -e "${RED}  Warning: Main firmware .bin file not found${NC}"
         fi
         
         if [ -n "$MAIN_ELF" ]; then
             cp "$MAIN_ELF" "$BUILD_DIR/$target/"
-            echo -e "${GREEN}  Copied ELF file: $(basename $MAIN_ELF)${NC}"
+            echo -e "${GREEN}  Copied ELF file: $(basename "$MAIN_ELF")${NC}"
         else
             echo -e "${RED}  Warning: Main firmware .elf file not found${NC}"
         fi
@@ -107,16 +108,17 @@ build_target() {
             MERGED_HEX=$(find build/ -name "*-merged.hex" | head -1)
             if [ -n "$MERGED_HEX" ]; then
                 cp "$MERGED_HEX" "$BUILD_DIR/$target/"
-                echo -e "${GREEN}  Copied merged hex: $(basename $MERGED_HEX)${NC}"
+                echo -e "${GREEN}  Copied merged hex: $(basename "$MERGED_HEX")${NC}"
             fi
         fi
         
-        if idf.py merge-bin --format bin; then
-            MERGED_BIN=$(find build/ -name "*-merged.bin" | head -1)
-            if [ -n "$MERGED_BIN" ]; then
-                cp "$MERGED_BIN" "$BUILD_DIR/$target/"
-                echo -e "${GREEN}  Copied merged bin: $(basename $MERGED_BIN)${NC}"
-            fi
+        MERGED_BIN="build/$target-merged.bin"
+        if idf.py merge-bin --format raw --output "$target-merged.bin"; then
+            cp "$MERGED_BIN" "$BUILD_DIR/$target/"
+            echo -e "${GREEN}  Copied merged bin: $(basename "$MERGED_BIN")${NC}"
+        else
+            echo -e "${RED}  Failed to create merged binary${NC}"
+            return 1
         fi
         
         # Generate flash script
@@ -145,7 +147,7 @@ python -m esptool \\
     0x10000 $MAIN_BIN_NAME \\
     0x210000 www.bin
 
-echo "Flash complete! Connect to ESP32_NTRIP WiFi network (password: 12345678)"
+echo "Flash complete! Connect to the ntrip-DUO_danusha open WiFi network"
 echo "Then navigate to http://192.168.4.1 to configure."
 EOF
         
@@ -178,7 +180,7 @@ python -m esptool ^
     0x10000 MAIN_BIN_NAME ^
     0x210000 www.bin
 
-echo Flash complete! Connect to ESP32_NTRIP WiFi network (password: 12345678)
+echo Flash complete! Connect to the ntrip-DUO_danusha open WiFi network
 echo Then navigate to http://192.168.4.1 to configure.
 pause
 EOF
@@ -212,7 +214,7 @@ EOF
 ### GPIO Pin Assignment
 - **Status LEDs:** Red=GPIO21, Green=GPIO22, Blue=GPIO23
 - **Additional LEDs:** RSSI=GPIO18, Sleep=GPIO27, Assoc=GPIO25  
-- **UART:** TX=GPIO1, RX=GPIO3, RTS=GPIO14, CTS=GPIO33
+- **UART:** TX=GPIO1, RX=GPIO3, RTS=GPIO32, CTS=GPIO33
 - **Button:** GPIO0
 
 EOF
@@ -240,7 +242,7 @@ EOF
 ### GPIO Pin Assignment  
 - **Status LEDs:** Red=GPIO4, Green=GPIO5, Blue=GPIO6
 - **Additional LEDs:** RSSI=GPIO18, Sleep=GPIO21, Assoc=GPIO47
-- **UART:** TX=GPIO43, RX=GPIO44, RTS=GPIO16, CTS=GPIO15
+- **UART:** TX=GPIO43, RX=GPIO44, RTS=GPIO16, CTS=GPIO17
 - **Button:** GPIO0
 
 ### ESP32-S3 Features
@@ -256,7 +258,7 @@ EOF
 ### GPIO Pin Assignment
 - **Status LEDs:** Red=GPIO4, Green=GPIO5, Blue=GPIO6  
 - **Additional LEDs:** RSSI=GPIO18, Sleep=GPIO19, Assoc=GPIO20
-- **UART:** TX=GPIO16, RX=GPIO17, RTS=GPIO4, CTS=GPIO5
+- **UART:** TX=GPIO16, RX=GPIO17, RTS=GPIO22, CTS=GPIO23
 - **Button:** GPIO9
 
 ### ESP32-C6 Features
@@ -289,7 +291,7 @@ python -m esptool --chip TARGET --port PORT -b 460800 --before default_reset --a
 
 ## First Time Setup
 1. Flash the firmware using one of the methods above
-2. Connect to **ESP32_NTRIP** WiFi network (password: `12345678`)
+2. Connect to the open **ntrip-DUO_danusha** WiFi network
 3. Open browser and navigate to http://192.168.4.1  
 4. Configure WiFi, NTRIP servers, and other settings
 5. Connect GNSS receiver to configured UART pins
@@ -300,7 +302,7 @@ python -m esptool --chip TARGET --port PORT -b 460800 --before default_reset --a
 - SD Card data logging  
 - Web-based configuration
 - Status LED indicators
-- Over-the-air updates
+- Web-based configuration and diagnostics
 
 For more information visit: https://github.com/danusha2345/esp32-ntrip-DUO_danusha
 EOF
@@ -311,11 +313,11 @@ EOF
         # Get build size info
         if [ -n "$MAIN_BIN" ] && [ -f "$MAIN_BIN" ]; then
             APP_SIZE=$(stat -f%z "$MAIN_BIN" 2>/dev/null || stat -c%s "$MAIN_BIN")
-            echo -e "${GREEN}  Application size: $(($APP_SIZE / 1024)) KB${NC}"
+            echo -e "${GREEN}  Application size: $((APP_SIZE / 1024)) KB${NC}"
         fi
         BOOT_SIZE=$(stat -f%z "build/bootloader/bootloader.bin" 2>/dev/null || stat -c%s "build/bootloader/bootloader.bin")
         
-        echo -e "${GREEN}  Bootloader size: $(($BOOT_SIZE / 1024)) KB${NC}"
+        echo -e "${GREEN}  Bootloader size: $((BOOT_SIZE / 1024)) KB${NC}"
         echo
         
     else
@@ -330,8 +332,8 @@ total_count=${#TARGETS[@]}
 
 for target in "${TARGETS[@]}"; do
     echo
-    if build_target $target; then
-        ((success_count++))
+    if build_target "$target"; then
+        success_count=$((success_count + 1))
     fi
 done
 
@@ -347,7 +349,7 @@ for target in "${TARGETS[@]}"; do
 done
 
 # Create combined archive with all targets
-tar -czf "esp32-ntrip-duo-all-$DATE.tar.gz" */
+tar -czf "esp32-ntrip-duo-all-$DATE.tar.gz" -- ./*/
 echo -e "${GREEN}✓ Created esp32-ntrip-duo-all-$DATE.tar.gz${NC}"
 
 cd ..
@@ -358,7 +360,7 @@ echo -e "${BLUE}Build Summary${NC}"
 echo -e "${BLUE}=============${NC}"
 echo -e "${GREEN}Successful builds: $success_count/$total_count${NC}"
 
-if [ $success_count -eq $total_count ]; then
+if [ "$success_count" -eq "$total_count" ]; then
     echo -e "${GREEN}✓ All builds completed successfully!${NC}"
     echo -e "${GREEN}✓ Release files created in $BUILD_DIR/${NC}"
 else
@@ -394,6 +396,6 @@ ls -lh firmware_releases/
 echo
 echo -e "${BLUE}Next steps:${NC}"
 echo "1. Test the firmware on your hardware"  
-echo "2. Create a git tag: git tag v$(date +%Y.%m.%d)"
-echo "3. Push tag to trigger release: git push origin --tags"
+echo "2. Create a Jujutsu tag: jj tag set v$(date +%Y.%m.%d) -r @-"
+echo "3. Push tag to trigger release: jj git push --tag v$(date +%Y.%m.%d)"
 echo "4. GitHub Actions will automatically create release with binaries"

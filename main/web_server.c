@@ -48,6 +48,7 @@
 #include <lwip/sockets.h>
 #include <esp_timer.h>
 #include "web_server.h"
+#include "sd_logger.h"
 
 // Max length a file path can have on storage
 #define FILE_PATH_MAX (ESP_VFS_PATH_MAX + CONFIG_SPIFFS_OBJ_NAME_LEN)
@@ -173,27 +174,32 @@ static char* get_path_from_uri(char *dest, const char *base_path, const char *ur
 }
 
 static esp_err_t json_response(httpd_req_t *req, cJSON *root) {
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_ERR_NO_MEM;
+    }
     // Set mime type
     esp_err_t err = httpd_resp_set_type(req, "application/json");
-    if (err != ESP_OK) return err;
-
-    // Convert to string
-    bool success = cJSON_PrintPreallocated(root, buffer, BUFFER_SIZE, false);
-    cJSON_Delete(root);
-    if (!success) {
-        ESP_LOGE(TAG, "Not enough space in buffer to output JSON");
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Not enough space in buffer to output JSON");
-        return ESP_FAIL;
+    if (err != ESP_OK) {
+        cJSON_Delete(root);
+        return err;
     }
 
-    // Send as response
-    err = httpd_resp_send(req, buffer, strlen(buffer));
-    if (err != ESP_OK) return err;
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!json) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_ERR_NO_MEM;
+    }
 
-    return ESP_OK;
+    err = httpd_resp_sendstr(req, json);
+    free(json);
+    return err;
 }
 
 static esp_err_t basic_auth(httpd_req_t *req) {
+    if (!basic_authentication) goto _auth_required;
+
     int authorization_length = httpd_req_get_hdr_value_len(req, "Authorization") + 1;
     if (authorization_length == 0) goto _auth_required;
 
@@ -220,30 +226,35 @@ static esp_err_t basic_auth(httpd_req_t *req) {
 static esp_err_t hotspot_auth(httpd_req_t *req) {
     int sock = httpd_req_to_sockfd(req);
 
-    struct sockaddr_in6 client_addr;
+    struct sockaddr_storage client_addr;
     socklen_t socklen = sizeof(client_addr);
-    getpeername(sock, (struct sockaddr *)&client_addr, &socklen);
+    if (getpeername(sock, (struct sockaddr *)&client_addr, &socklen) != 0) goto auth_error;
 
-    // TODO: Correctly read IPv4?
-    // KNOWN ISSUE: IPv4-mapped IPv6 address handling needs improvement.
-    // Current implementation assumes dual-stack socket with IPv4 addresses
-    // mapped to IPv6 format (::ffff:x.x.x.x). For pure IPv4 sockets, this
-    // may need adjustment to use sockaddr_in instead of sockaddr_in6.
-    // ERROR_ACTION(TAG, client_addr.sin6_family != AF_INET, goto _auth_error, "IPv6 connections not supported, IP family %d", client_addr.sin6_family);
+    uint32_t client_ipv4;
+    if (client_addr.ss_family == AF_INET) {
+        client_ipv4 = ((struct sockaddr_in *) &client_addr)->sin_addr.s_addr;
+    } else if (client_addr.ss_family == AF_INET6) {
+        const struct in6_addr *address = &((struct sockaddr_in6 *) &client_addr)->sin6_addr;
+        static const uint8_t mapped_prefix[12] = {
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff
+        };
+        if (memcmp(address->s6_addr, mapped_prefix, sizeof(mapped_prefix)) != 0) goto auth_error;
+        memcpy(&client_ipv4, &address->s6_addr[12], sizeof(client_ipv4));
+    } else {
+        goto auth_error;
+    }
 
     wifi_sta_list_t *ap_sta_list = wifi_ap_sta_list();
     wifi_sta_mac_ip_list_t esp_netif_ap_sta_list;
-    esp_wifi_ap_get_sta_list_with_ip(ap_sta_list, &esp_netif_ap_sta_list);
-
-    // TODO: Correctly read IPv4?
-    // KNOWN ISSUE: IP address comparison assumes IPv4-mapped-IPv6 format.
-    // The 4th word ([3]) of sin6_addr contains the IPv4 address in this case.
-    // This works for dual-stack but may fail for pure IPv6 connections.
-    for (int i = 0; i < esp_netif_ap_sta_list.num; i++) {
-        if (esp_netif_ap_sta_list.sta[i].ip.addr == client_addr.sin6_addr.un.u32_addr[3]) return ESP_OK;
+    if (esp_wifi_ap_get_sta_list_with_ip(ap_sta_list, &esp_netif_ap_sta_list) != ESP_OK) {
+        goto auth_error;
     }
 
-    //_auth_error:
+    for (int i = 0; i < esp_netif_ap_sta_list.num; i++) {
+        if (esp_netif_ap_sta_list.sta[i].ip.addr == client_ipv4) return ESP_OK;
+    }
+
+auth_error:
     httpd_resp_set_status(req, "401"); // Unauthorized
     char *unauthorized = "401 Unauthorized - Configured to only accept connections from hotspot devices";
     httpd_resp_send(req, unauthorized, strlen(unauthorized));
@@ -557,24 +568,72 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     return json_response(req, root);
 }
 
+static bool json_int64(cJSON *entry, int64_t *value) {
+    if (cJSON_IsBool(entry)) {
+        *value = cJSON_IsTrue(entry) ? 1 : 0;
+        return true;
+    }
+    if (cJSON_IsNumber(entry)) {
+        int64_t integer = (int64_t) entry->valuedouble;
+        if ((double) integer != entry->valuedouble) return false;
+        *value = integer;
+        return true;
+    }
+    if (!cJSON_IsString(entry) || !entry->valuestring) return false;
+
+    char *end;
+    errno = 0;
+    long long integer = strtoll(entry->valuestring, &end, 10);
+    if (errno != 0 || end == entry->valuestring || *end != '\0') return false;
+    *value = (int64_t) integer;
+    return true;
+}
+
+static bool json_uint64(cJSON *entry, uint64_t *value) {
+    int64_t signed_value;
+    if (!json_int64(entry, &signed_value) || signed_value < 0) return false;
+    *value = (uint64_t) signed_value;
+    return true;
+}
+
 static esp_err_t config_post_handler(httpd_req_t *req) {
     if (check_auth(req) == ESP_FAIL) return ESP_FAIL;
 
-    int ret = httpd_req_recv(req, buffer, BUFFER_SIZE - 1);
-    if (ret <= 0) {
-        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-            httpd_resp_send_408(req);
-        }
-
-        return ESP_FAIL;
+    if (req->content_len == 0 || req->content_len > 8192) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid configuration size");
+        return ESP_ERR_INVALID_SIZE;
     }
 
-    buffer[ret] = '\0';
+    char *request_body = malloc(req->content_len + 1);
+    if (!request_body) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_ERR_NO_MEM;
+    }
 
-    cJSON *root = cJSON_Parse(buffer);
+    size_t received = 0;
+    while (received < req->content_len) {
+        int ret = httpd_req_recv(req, request_body + received, req->content_len - received);
+        if (ret <= 0) {
+            free(request_body);
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) httpd_resp_send_408(req);
+            return ESP_FAIL;
+        }
+        received += (size_t) ret;
+    }
+    request_body[received] = '\0';
+
+    cJSON *root = cJSON_Parse(request_body);
+    free(request_body);
+    if (!cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON object");
+        return ESP_ERR_INVALID_ARG;
+    }
 
     int config_item_count;
     const config_item_t *config_items = config_items_get(&config_item_count);
+    esp_err_t first_error = ESP_OK;
+    const char *invalid_key = NULL;
     for (int i = 0; i < config_item_count; i++) {
         config_item_t item = config_items[i];
 
@@ -592,29 +651,29 @@ static esp_err_t config_post_handler(httpd_req_t *req) {
                 if (strcmp(entry->valuestring, CONFIG_VALUE_UNCHANGED) == 0) continue;
             }
 
-            // TODO: Cleanup
-            // REFACTORING NEEDED: This large if-else chain should be refactored into
-            // a switch statement or a lookup table for better maintainability.
-            // Consider extracting each type handler into separate functions.
             esp_err_t err;
-            if (item.type > CONFIG_ITEM_TYPE_MAX) {
+            if (item.type >= CONFIG_ITEM_TYPE_MAX) {
                 err = ESP_ERR_INVALID_ARG;
             } else if (item.type == CONFIG_ITEM_TYPE_STRING) {
-                err = config_set_str(item.key, entry->valuestring);
+                err = cJSON_IsString(entry) ? config_set_str(item.key, entry->valuestring)
+                                            : ESP_ERR_INVALID_ARG;
             } else if (item.type == CONFIG_ITEM_TYPE_BLOB) {
-                err = config_set_blob(item.key, entry->valuestring, length);
+                err = cJSON_IsString(entry) ? config_set_blob(item.key, entry->valuestring, length)
+                                            : ESP_ERR_INVALID_ARG;
             } else if (item.type == CONFIG_ITEM_TYPE_COLOR) {
-                bool is_black = strcmp(entry->valuestring, "#000000") == 0;
-                config_color_t color;
-                color.rgba = strtoul(entry->valuestring + 1, NULL, 16) << 8u;
-
-                if (!is_black && color.rgba == 0) {
+                if (!cJSON_IsString(entry) || strlen(entry->valuestring) != 7 ||
+                    entry->valuestring[0] != '#') {
                     err = ESP_ERR_INVALID_ARG;
                 } else {
-                    // Set alpha to default
-                    if (!is_black) color.values.alpha = item.def.color.values.alpha;
-
-                    err = config_set_color(item.key, color);
+                    char *end;
+                    unsigned long rgb = strtoul(entry->valuestring + 1, &end, 16);
+                    if (*end != '\0' || rgb > 0xffffffUL) {
+                        err = ESP_ERR_INVALID_ARG;
+                    } else {
+                        config_color_t color = {.rgba = (uint32_t) rgb << 8u};
+                        if (rgb != 0) color.values.alpha = item.def.color.values.alpha;
+                        err = config_set_color(item.key, color);
+                    }
                 }
             } else if (item.type == CONFIG_ITEM_TYPE_IP) {
                 uint8_t a[4];
@@ -622,51 +681,91 @@ static esp_err_t config_post_handler(httpd_req_t *req) {
                 if (!cJSON_IsArray(entry) || cJSON_GetArraySize(entry) != 4) {
                     err = ESP_ERR_INVALID_ARG;
                 } else {
+                    err = ESP_OK;
                     for (int b = 0; b < 4; b++) {
-                        a[b] = (uint8_t) strtoul(cJSON_GetArrayItem(entry, b)->valuestring, NULL, 10);
+                        uint64_t octet;
+                        if (!json_uint64(cJSON_GetArrayItem(entry, b), &octet) || octet > 255) {
+                            err = ESP_ERR_INVALID_ARG;
+                            break;
+                        }
+                        a[b] = (uint8_t) octet;
                     }
-;
-                    uint32_t ip = esp_netif_htonl(esp_netif_ip4_makeu32(a[0], a[1], a[2], a[3]));
-                    err = config_set_u32(item.key, ip);
+                    if (err == ESP_OK) {
+                        uint32_t ip = esp_netif_htonl(esp_netif_ip4_makeu32(a[0], a[1], a[2], a[3]));
+                        err = config_set_u32(item.key, ip);
+                    }
                 }
             } else {
-                bool is_zero = strcmp(entry->valuestring, "0") == 0 || strcmp(entry->valuestring, "0.0") == 0;
-                int64_t int64 = strtol(entry->valuestring, NULL, 10);
-                uint64_t uint64 = strtoul(entry->valuestring, NULL, 10);
-
-                if (!is_zero && (int64 == 0 || uint64 == 0)) {
-                    err = ESP_ERR_INVALID_ARG;
-                } else {
-                    switch (item.type) {
-                        case CONFIG_ITEM_TYPE_BOOL:
-                        case CONFIG_ITEM_TYPE_INT8:
-                        case CONFIG_ITEM_TYPE_INT16:
-                        case CONFIG_ITEM_TYPE_INT32:
-                        case CONFIG_ITEM_TYPE_INT64:
-                            err = config_set(&item, &int64);
-                            break;
-                        case CONFIG_ITEM_TYPE_UINT8:
-                        case CONFIG_ITEM_TYPE_UINT16:
-                        case CONFIG_ITEM_TYPE_UINT32:
-                        case CONFIG_ITEM_TYPE_UINT64:
-                            err = config_set(&item, &uint64);
-                            break;
-                        default:
-                            err = ESP_FAIL;
-                            break;
-                    }
+                int64_t signed_value;
+                uint64_t unsigned_value;
+                switch (item.type) {
+                    case CONFIG_ITEM_TYPE_BOOL:
+                        err = json_int64(entry, &signed_value) &&
+                              (signed_value == 0 || signed_value == 1)
+                              ? config_set_bool1(item.key, signed_value == 1) : ESP_ERR_INVALID_ARG;
+                        break;
+                    case CONFIG_ITEM_TYPE_INT8:
+                        err = json_int64(entry, &signed_value) && signed_value >= INT8_MIN && signed_value <= INT8_MAX
+                              ? config_set_i8(item.key, (int8_t) signed_value) : ESP_ERR_INVALID_ARG;
+                        break;
+                    case CONFIG_ITEM_TYPE_INT16:
+                        err = json_int64(entry, &signed_value) && signed_value >= INT16_MIN && signed_value <= INT16_MAX
+                              ? config_set_i16(item.key, (int16_t) signed_value) : ESP_ERR_INVALID_ARG;
+                        break;
+                    case CONFIG_ITEM_TYPE_INT32:
+                        err = json_int64(entry, &signed_value) && signed_value >= INT32_MIN && signed_value <= INT32_MAX
+                              ? config_set_i32(item.key, (int32_t) signed_value) : ESP_ERR_INVALID_ARG;
+                        break;
+                    case CONFIG_ITEM_TYPE_INT64:
+                        err = json_int64(entry, &signed_value)
+                              ? config_set_i64(item.key, signed_value) : ESP_ERR_INVALID_ARG;
+                        break;
+                    case CONFIG_ITEM_TYPE_UINT8:
+                        err = json_uint64(entry, &unsigned_value) && unsigned_value <= UINT8_MAX
+                              ? config_set_u8(item.key, (uint8_t) unsigned_value) : ESP_ERR_INVALID_ARG;
+                        break;
+                    case CONFIG_ITEM_TYPE_UINT16:
+                        err = json_uint64(entry, &unsigned_value) && unsigned_value <= UINT16_MAX
+                              ? config_set_u16(item.key, (uint16_t) unsigned_value) : ESP_ERR_INVALID_ARG;
+                        break;
+                    case CONFIG_ITEM_TYPE_UINT32:
+                        err = json_uint64(entry, &unsigned_value) && unsigned_value <= UINT32_MAX
+                              ? config_set_u32(item.key, (uint32_t) unsigned_value) : ESP_ERR_INVALID_ARG;
+                        break;
+                    case CONFIG_ITEM_TYPE_UINT64:
+                        err = json_uint64(entry, &unsigned_value)
+                              ? config_set_u64(item.key, unsigned_value) : ESP_ERR_INVALID_ARG;
+                        break;
+                    default:
+                        err = ESP_ERR_INVALID_ARG;
+                        break;
                 }
             }
 
             if (err != ESP_OK) {
-                ESP_LOGE(TAG, "Error setting %s = %s: %d - %s", item.key, entry->valuestring, err, esp_err_to_name(err));
+                ESP_LOGE(TAG, "Invalid configuration value for %s: %s", item.key, esp_err_to_name(err));
+                if (first_error == ESP_OK) {
+                    first_error = err;
+                    invalid_key = item.key;
+                }
             }
         }
     }
 
     cJSON_Delete(root);
 
-    config_commit();
+    if (first_error != ESP_OK) {
+        char message[96];
+        snprintf(message, sizeof(message), "Invalid value for %s", invalid_key);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, message);
+        return first_error;
+    }
+
+    esp_err_t commit_error = config_commit();
+    if (commit_error != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save configuration");
+        return commit_error;
+    }
     config_restart();
 
     root = cJSON_CreateObject();
@@ -797,7 +896,7 @@ static esp_err_t sd_log_status_handler(httpd_req_t *req) {
     if (check_auth(req) == ESP_FAIL) return ESP_FAIL;
 
     cJSON *root = cJSON_CreateObject();
-    bool enabled = config_get_bool1(CONF_ITEM(KEY_CONFIG_SD_LOGGING_ACTIVE));
+    bool enabled = sd_logger_is_enabled();
     cJSON_AddBoolToObject(root, "enabled", enabled);
     
     return json_response(req, root);
@@ -828,10 +927,18 @@ static esp_err_t sd_log_toggle_handler(httpd_req_t *req) {
     }
 
     bool enabled = cJSON_IsTrue(enabled_item);
-    config_set_bool1(KEY_CONFIG_SD_LOGGING_ACTIVE, enabled);
-    config_commit();
+    esp_err_t err = enabled ? sd_logger_init() : sd_logger_enable(false);
+    if (err == ESP_OK) err = config_set_bool1(KEY_CONFIG_SD_LOGGING_ACTIVE, enabled);
+    if (err == ESP_OK) err = config_commit();
 
     cJSON_Delete(root);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to toggle SD logging: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                            "Failed to initialize SD card");
+        return err;
+    }
 
     cJSON *resp = cJSON_CreateObject();
     cJSON_AddStringToObject(resp, "status", "ok");
@@ -864,24 +971,26 @@ static esp_err_t serial_command_post_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-    // Отправляем команду через UART
     const char *cmd = cJSON_GetStringValue(command);
-    uart_write_bytes(UART_NUM_0, cmd, strlen(cmd));
-    uart_write_bytes(UART_NUM_0, "\r\n", 2);
+    if (strlen(cmd) >= 256) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Command is too long");
+        return ESP_ERR_INVALID_SIZE;
+    }
+    char command_copy[256];
+    strlcpy(command_copy, cmd, sizeof(command_copy));
 
     cJSON_Delete(root);
 
-    // Ждем ответа с таймаутом 2 секунды
-    char response[1024] = {0};
-    int len = uart_read_bytes(UART_NUM_0, response, sizeof(response) - 1, pdMS_TO_TICKS(2000));
-    if (len > 0) {
-        response[len] = '\0';
-    }
+    // uart_task is the only UART reader. Reading here would steal bytes from
+    // NTRIP/socket/SD subscribers, so the command endpoint is asynchronous.
+    uart_write(command_copy, strlen(command_copy));
+    uart_write("\r\n", 2);
 
     cJSON *resp = cJSON_CreateObject();
     cJSON_AddStringToObject(resp, "status", "ok");
-    cJSON_AddStringToObject(resp, "command", cmd);
-    cJSON_AddStringToObject(resp, "response", response);
+    cJSON_AddStringToObject(resp, "command", command_copy);
+    cJSON_AddStringToObject(resp, "response", "Command sent; response is forwarded through the configured streams");
 
     return json_response(req, resp);
 }
@@ -939,6 +1048,14 @@ static httpd_handle_t web_server_start(void)
         free(password);
     }
 
+    if (!buffer) {
+        buffer = malloc(BUFFER_SIZE);
+        if (!buffer) {
+            ESP_LOGE(TAG, "Failed to allocate buffer for web server");
+            return NULL;
+        }
+    }
+
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     // Увеличиваем число доступных слотов под URI-обработчики: у нас >12 маршрутов
@@ -974,13 +1091,8 @@ static httpd_handle_t web_server_start(void)
 
     if (server == NULL) {
         ESP_LOGE(TAG, "Could not start server");
-        return NULL;
-    }
-
-    buffer = malloc(BUFFER_SIZE);
-    if (!buffer) {
-        ESP_LOGE(TAG, "Failed to allocate buffer for web server");
-        httpd_stop(server);
+        free(buffer);
+        buffer = NULL;
         return NULL;
     }
 

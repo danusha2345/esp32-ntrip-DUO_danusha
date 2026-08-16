@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -107,11 +108,17 @@ QueueHandle_t button_init(unsigned long long pin_select) {
     }
 
     // Configure the pins
-    gpio_config_t io_conf;
-    io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pin_bit_mask = pin_select;
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    gpio_config(&io_conf);
+    gpio_config_t io_conf = {
+        .mode = GPIO_MODE_INPUT,
+        .pin_bit_mask = pin_select,
+        .intr_type = GPIO_INTR_DISABLE,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+    };
+    if (gpio_config(&io_conf) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to configure button GPIOs");
+        return NULL;
+    }
 
     // Scan the pin map to determine number of pins
     pin_count = 0;
@@ -124,6 +131,15 @@ QueueHandle_t button_init(unsigned long long pin_select) {
     // Initialize global state and queue
     debounce = calloc(pin_count, sizeof(debounce_t));
     queue = xQueueCreate(4, sizeof(button_event_t));
+    if (pin_count == 0 || debounce == NULL || queue == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate button resources");
+        free(debounce);
+        debounce = NULL;
+        if (queue != NULL) vQueueDelete(queue);
+        queue = NULL;
+        pin_count = -1;
+        return NULL;
+    }
 
     // Scan the pin map to determine each pin number, populate the state
     uint32_t idx = 0;
@@ -139,7 +155,15 @@ QueueHandle_t button_init(unsigned long long pin_select) {
     }
 
     // Spawn a task to monitor the pins
-    xTaskCreate(&button_task, "button_task", 4096, NULL, 10, NULL);
+    if (xTaskCreate(&button_task, "button_task", 4096, NULL, 10, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create button task");
+        free(debounce);
+        debounce = NULL;
+        vQueueDelete(queue);
+        queue = NULL;
+        pin_count = -1;
+        return NULL;
+    }
 
     return queue;
 }

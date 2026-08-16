@@ -103,7 +103,7 @@ char *extract_http_header(const char *buffer, const char *key) {
     return header_value;
 }
 
-int connect_socket(char *host, int port, int socktype) {
+int connect_socket(const char *host, int port, int socktype) {
     int err;
     struct addrinfo addr_hints;
     struct addrinfo *addr_results;
@@ -160,7 +160,7 @@ int connect_socket(char *host, int port, int socktype) {
 }
 
 char *http_auth_basic_header(const char *username, const char *password) {
-    int out;
+    size_t out;
     char *user_info = NULL;
     char *digest = NULL;
     size_t n = 0;
@@ -175,19 +175,29 @@ char *http_auth_basic_header(const char *username, const char *password) {
     }
     
     strlcpy(digest, "Basic ", 7);
-    mbedtls_base64_encode((unsigned char *)digest + 6, n, (size_t *)&out, (const unsigned char *)user_info, strlen(user_info));
+    if (mbedtls_base64_encode((unsigned char *) digest + 6, n, &out,
+                              (const unsigned char *) user_info,
+                              strlen(user_info)) != 0) {
+        free(user_info);
+        free(digest);
+        return NULL;
+    }
     free(user_info);
     return digest;
 }
 
-esp_err_t write_all(int fd, char *buf, size_t buf_len) {
-    int ret;
+esp_err_t write_all(int fd, const void *buf, size_t buf_len) {
+    const uint8_t *position = buf;
     while (buf_len > 0) {
-        ret = write(fd, buf, buf_len);
-        if (ret < 0) return ESP_FAIL;
+        ssize_t ret = write(fd, position, buf_len);
+        if (ret < 0) {
+            if (errno == EINTR) continue;
+            return ESP_FAIL;
+        }
+        if (ret == 0) return ESP_FAIL;
 
-        buf += ret;
-        buf_len -= ret;
+        position += (size_t) ret;
+        buf_len -= (size_t) ret;
     }
     return ESP_OK;
 }

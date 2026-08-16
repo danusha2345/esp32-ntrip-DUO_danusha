@@ -9,6 +9,8 @@
 #define SOCKET_SERVER_H
 
 #include "esp_err.h"
+#include <stdbool.h>
+#include <stdint.h>
 #include <time.h>
 
 #ifdef __cplusplus
