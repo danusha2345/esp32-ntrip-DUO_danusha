@@ -23,15 +23,23 @@ jobs:
           - target: esp32
             board_name: "ESP32"
             flash_size: "4MB"
+            flash_freq: "40m"
+            bootloader_offset: "0x1000"
           - target: esp32c3
             board_name: "ESP32-C3"
             flash_size: "4MB"
+            flash_freq: "40m"
+            bootloader_offset: "0x0"
           - target: esp32s3
             board_name: "ESP32-S3"
             flash_size: "8MB"
+            flash_freq: "40m"
+            bootloader_offset: "0x0"
           - target: esp32c6
             board_name: "ESP32-C6"
             flash_size: "4MB"
+            flash_freq: "80m"
+            bootloader_offset: "0x0"
     
     steps:
     - name: Checkout repository
@@ -94,9 +102,9 @@ jobs:
         # Use with ESP32 Flash Download Tool or esptool.py
         
         # Flash command:
-        # python -m esptool --chip ${{ matrix.target }} -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size ${{ matrix.flash_size }} --flash_freq 40m 0x1000 bootloader.bin 0x8000 partition-table.bin 0x10000 ${{ matrix.target }}-ntrip-duo.bin 0x210000 www.bin
+        # python -m esptool --chip ${{ matrix.target }} -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size ${{ matrix.flash_size }} --flash_freq ${{ matrix.flash_freq }} ${{ matrix.bootloader_offset }} bootloader.bin 0x8000 partition-table.bin 0x10000 ${{ matrix.target }}-ntrip-duo.bin 0x210000 www.bin
         
-        0x1000=bootloader.bin
+        ${{ matrix.bootloader_offset }}=bootloader.bin
         0x8000=partition-table.bin
         0x10000=${{ matrix.target }}-ntrip-duo.bin
         0x210000=www.bin
@@ -120,14 +128,14 @@ jobs:
         ### Using ESP32 Flash Download Tool
         1. Download and install [ESP32 Flash Download Tool](https://www.espressif.com/en/support/download/other-tools)
         2. Load the `download.conf` configuration
-        3. Set flash parameters: DIO mode, ${{ matrix.flash_size }}, 40MHz
+        3. Set flash parameters: DIO mode, ${{ matrix.flash_size }}, ${{ matrix.flash_freq }}
         4. Connect your ${{ matrix.board_name }} and flash
         
         ### Using esptool.py (Individual Files)
         ```bash
         pip install esptool
         
-        python -m esptool --chip ${{ matrix.target }} -p COM_PORT -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size ${{ matrix.flash_size }} --flash_freq 40m 0x1000 bootloader.bin 0x8000 partition-table.bin 0x10000 ${{ matrix.target }}-ntrip-duo.bin 0x210000 www.bin
+        python -m esptool --chip ${{ matrix.target }} -p COM_PORT -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size ${{ matrix.flash_size }} --flash_freq ${{ matrix.flash_freq }} ${{ matrix.bootloader_offset }} bootloader.bin 0x8000 partition-table.bin 0x10000 ${{ matrix.target }}-ntrip-duo.bin 0x210000 www.bin
         ```
         
         ### Using esptool.py (Merged Firmware - Recommended)
@@ -292,14 +300,14 @@ jobs:
         - ✅ **TCP/UDP Socket Server/Client**: Network socket functionality
         - ✅ **Serial Commands**: Remote GNSS configuration via web interface
         - ✅ **SD Card Logging**: Automatic RTCM data logging with daily file rotation
-        - ✅ **Extended ESP32-S3 and ESP32-C6 support**: Fixed ESP-IDF 5.5 compatibility
+        - ✅ **Multi-target builds**: ESP32, ESP32-C3, ESP32-S3, and ESP32-C6 on ESP-IDF 5.4.4
         - ✅ **Enhanced web interface**: Improved Socket and Serial Commands modules
         
         ## Quick Start
         1. Download the appropriate .tar.gz file for your ESP32 variant
         2. Extract the archive
         3. Follow the README.md inside for flashing instructions
-        4. Connect to ESP32_NTRIP WiFi network (password: 12345678)
+        4. Connect to the open `ntrip-DUO_danusha` WiFi network (no password)
         5. Configure via web interface at http://192.168.4.1
         
         ## Hardware Requirements
@@ -375,7 +383,7 @@ jobs:
           
           ### 🔗 First Time Setup
           1. Flash appropriate firmware for your ESP32 variant
-          2. Connect to **ESP32_NTRIP** WiFi (password: `12345678`)
+          2. Connect to the open **ntrip-DUO_danusha** WiFi network (no password)
           3. Navigate to http://192.168.4.1 in your browser
           4. Configure WiFi, NTRIP servers, and other settings
           

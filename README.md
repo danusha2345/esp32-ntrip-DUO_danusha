@@ -5,13 +5,13 @@
 [![GitHub release](https://img.shields.io/github/v/release/danusha2345/esp32-ntrip-DUO_danusha)](https://github.com/danusha2345/esp32-ntrip-DUO_danusha/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-This is modified version of ESP32 xbee.
+This is a modified version of ESP32 XBee.
 
-Main difference is that this have two NTRIP servers that can be running at the same time to be able to feed Onocoy and RTK Direct!!!
+The main difference is support for two NTRIP source connections running at the same time, for example to feed Onocoy and RTK Direct.
 
 ESP32 NTRIP Duo is made with [ESP-IDF](https://github.com/espressif/esp-idf). Its main function is to forward the UART of the ESP32 to a variety of protocols over WiFi.
 
-In this version Installation is simplified, with just a single bin file. You can use ESPHome web flasher https://web.esphome.io/ just connect your ESP32 dev board to PC, select connect, cho0se correct COM port, connect and install. On popup choose bin file and click install.
+Installation uses the all-in-one `<target>-ntrip-duo-merged.bin` image, built for offset `0x0`. In [ESPHome Web](https://web.esphome.io/), connect the board, select the correct serial port, choose the merged image, and install it. If another flashing tool asks for an offset, use `0x0`. Do not select the application-only `<target>-ntrip-duo.bin` file.
 
 This software builds for ESP32, ESP32-C3, ESP32-S3 and ESP32-C6. Choose the firmware matching the chip.
 ## Features
@@ -31,7 +31,7 @@ This software builds for ESP32, ESP32-C3, ESP32-S3 and ESP32-C6. Choose the firm
 ## Help
 The tested toolchain is ESP-IDF 5.4.4.
 
-To install the latest firmware use ESPHome web Flasher https://web.esphome.io/
+To install a published firmware release, use the target-specific merged image with [ESPHome Web](https://web.esphome.io/).
 
 Here is installation video https://youtu.be/33Mu5EV7fOE?si=J6kwCt6bbmIu7HnS
 
@@ -56,19 +56,21 @@ ESP32S3: gpio4 Red, gpio5 Green, gpio6 Blue
    - `esp32-ntrip-duo-esp32c3-*.tar.gz` for ESP32-C3
    - `esp32-ntrip-duo-esp32s3-*.tar.gz` for ESP32-S3  
    - `esp32-ntrip-duo-esp32c6-*.tar.gz` for ESP32-C6
-3. Extract and follow the included README for flashing instructions
+3. Extract the archive and flash `<target>-ntrip-duo-merged.bin` at offset `0x0`. In release `v2025.10.07` and older, ignore the individual-file flash command and outdated WiFi credentials in the included README.
 
 ### 🔧 Build from Source
 ```bash
 jj git clone https://github.com/danusha2345/esp32-ntrip-DUO_danusha.git
 cd esp32-ntrip-DUO_danusha
 
-# Setup ESP-IDF (if not already done)
-export IDF_TOOLS_PATH=/home/danik/storage/espressif
-source /home/danik/storage/esp/esp-idf-v5.4.4/export.sh
+# Install ESP-IDF 5.4.4 first, then load its environment.
+# Adjust this path if ESP-IDF was installed elsewhere.
+source "$HOME/esp/esp-idf/export.sh"
 
 # Build for your target
-idf.py set-target esp32     # or esp32c3, esp32s3, esp32c6
+TARGET=esp32c3             # esp32, esp32c3, esp32s3, or esp32c6
+idf.py set-target "$TARGET"
+if [ -f "sdkconfig.$TARGET" ]; then cp "sdkconfig.$TARGET" sdkconfig; fi
 idf.py build
 idf.py flash
 ```
@@ -85,7 +87,7 @@ idf.py flash
 - **ESP32**: Original ESP32 development boards
 - **ESP32-C3**: ESP32-C3 with RISC-V core and USB JTAG
 - **ESP32-S3**: ESP32-S3 based boards with enhanced GPIO
-- **ESP32-C6**: Latest ESP32-C6 with WiFi 6 support
+- **ESP32-C6**: ESP32-C6 with RISC-V core and WiFi 6 support
 
 ### Pin Connections
 
@@ -102,10 +104,14 @@ RTS/CTS pins are only assigned when the corresponding hardware flow-control opti
 
 **Status LED (Common Anode RGB):**
 - **ESP32**: Red=GPIO21, Green=GPIO22, Blue=GPIO23
+- **ESP32-C3**: Red=GPIO8, Green=GPIO9, Blue=GPIO10
 - **ESP32-S3**: Red=GPIO4, Green=GPIO5, Blue=GPIO6
+- **ESP32-C6**: Red=GPIO4, Green=GPIO5, Blue=GPIO6
 
 **SD Card (Optional for logging):**
-- MISO: GPIO2, MOSI: GPIO15, CLK: GPIO14, CS: GPIO13
+- **ESP32-C3 defaults**: MISO=GPIO7, MOSI=GPIO15, CLK=GPIO14, CS=GPIO13
+- **Other targets default**: MISO=GPIO2, MOSI=GPIO15, CLK=GPIO14, CS=GPIO13
+- All SD pins can be changed under `SD logger configuration` in `menuconfig`.
 
 **Basic Connection:**
 - Connect GNSS TX to ESP32 RX pin
@@ -123,7 +129,7 @@ RTS/CTS pins are only assigned when the corresponding hardware flow-control opti
 - **UART Settings** - Baud rate, data bits, parity, stop bits
 - **Serial Commands** - Send AT commands or custom data
 - **SD Card Logging** - Enable/disable data logging with status display
-- **Admin Panel** - Security and access control
+- **Admin Panel** - Optional HTTP Basic authentication and access control
 - **Status Monitoring** - Real-time connection and data flow status
 
 ### Socket Server/Client
@@ -145,6 +151,7 @@ The firmware includes full TCP/UDP socket functionality:
 - Default WiFi AP name: **ntrip-DUO_danusha**
 - Default WiFi AP: **Open network (no password)**
 - Default web interface: **http://192.168.4.1**
+- Admin authentication is disabled by default. Enabling it prevents unauthenticated access, but the open AP and HTTP interface still provide no transport encryption; HTTP Basic credentials are sent without encryption.
 - Tested with ESP-IDF 5.4.4
 - Project is under active development
 

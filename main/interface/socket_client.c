@@ -238,7 +238,7 @@ esp_err_t socket_client_init(void) {
         return ESP_ERR_NO_MEM;
     }
 
-    status_led = status_led_add(0x00FF0055, STATUS_LED_STATIC, 0, 0, 0);
+    status_led = status_led_add(0x00FF0055, STATUS_LED_STATIC, 0, 1000, 0);
     if (status_led) status_led->active = false;
 
     // Start client task
@@ -253,6 +253,8 @@ esp_err_t socket_client_init(void) {
         uart_unregister_read_handler(socket_client_uart_handler);
         vStreamBufferDelete(uart_stream);
         uart_stream = NULL;
+        status_led_remove(status_led);
+        status_led = NULL;
         return ESP_ERR_NO_MEM;
     }
 
@@ -281,6 +283,8 @@ esp_err_t socket_client_deinit(void) {
     uart_unregister_read_handler(socket_client_uart_handler);
     vStreamBufferDelete(uart_stream);
     uart_stream = NULL;
+    status_led_remove(status_led);
+    status_led = NULL;
 
     return ESP_OK;
 }

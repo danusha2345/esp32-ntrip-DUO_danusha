@@ -200,15 +200,21 @@ static esp_err_t json_response(httpd_req_t *req, cJSON *root) {
 static esp_err_t basic_auth(httpd_req_t *req) {
     if (!basic_authentication) goto _auth_required;
 
-    int authorization_length = httpd_req_get_hdr_value_len(req, "Authorization") + 1;
-    if (authorization_length == 0) goto _auth_required;
+    size_t authorization_value_length = httpd_req_get_hdr_value_len(req, "Authorization");
+    if (authorization_value_length == 0) goto _auth_required;
+
+    size_t authorization_length = authorization_value_length + 1;
 
     char *authorization_header = malloc(authorization_length);
     if (!authorization_header) {
         ESP_LOGE(TAG, "Failed to allocate memory for authorization header");
         goto _auth_required;
     }
-    httpd_req_get_hdr_value_str(req, "Authorization", authorization_header, authorization_length);
+    if (httpd_req_get_hdr_value_str(req, "Authorization", authorization_header,
+                                    authorization_length) != ESP_OK) {
+        free(authorization_header);
+        goto _auth_required;
+    }
 
     bool authenticated = strcasecmp(basic_authentication, authorization_header) == 0;
     free(authorization_header);
@@ -596,6 +602,102 @@ static bool json_uint64(cJSON *entry, uint64_t *value) {
     return true;
 }
 
+static esp_err_t config_process_entry(const config_item_t *item, cJSON *entry, bool apply) {
+    size_t length = 0;
+    if (cJSON_IsString(entry)) {
+        length = strlen(entry->valuestring);
+
+        // Empty primitive and masked secret values mean "leave unchanged".
+        if ((length == 0 && item->type != CONFIG_ITEM_TYPE_BLOB &&
+             item->type != CONFIG_ITEM_TYPE_STRING) ||
+            strcmp(entry->valuestring, CONFIG_VALUE_UNCHANGED) == 0) {
+            return ESP_OK;
+        }
+    }
+
+    if (item->type >= CONFIG_ITEM_TYPE_MAX) return ESP_ERR_INVALID_ARG;
+
+    if (item->type == CONFIG_ITEM_TYPE_STRING) {
+        if (!cJSON_IsString(entry)) return ESP_ERR_INVALID_ARG;
+        return apply ? config_set_str(item->key, entry->valuestring) : ESP_OK;
+    }
+    if (item->type == CONFIG_ITEM_TYPE_BLOB) {
+        if (!cJSON_IsString(entry)) return ESP_ERR_INVALID_ARG;
+        return apply ? config_set_blob(item->key, entry->valuestring, length) : ESP_OK;
+    }
+    if (item->type == CONFIG_ITEM_TYPE_COLOR) {
+        if (!cJSON_IsString(entry) || strlen(entry->valuestring) != 7 ||
+            entry->valuestring[0] != '#') {
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        char *end;
+        unsigned long rgb = strtoul(entry->valuestring + 1, &end, 16);
+        if (*end != '\0' || rgb > 0xffffffUL) return ESP_ERR_INVALID_ARG;
+
+        config_color_t color = {.rgba = (uint32_t) rgb << 8u};
+        if (rgb != 0) color.values.alpha = item->def.color.values.alpha;
+        return apply ? config_set_color(item->key, color) : ESP_OK;
+    }
+    if (item->type == CONFIG_ITEM_TYPE_IP) {
+        uint8_t octets[4];
+        if (!cJSON_IsArray(entry) || cJSON_GetArraySize(entry) != 4) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        for (int i = 0; i < 4; i++) {
+            uint64_t octet;
+            if (!json_uint64(cJSON_GetArrayItem(entry, i), &octet) || octet > 255) {
+                return ESP_ERR_INVALID_ARG;
+            }
+            octets[i] = (uint8_t) octet;
+        }
+        uint32_t ip = esp_netif_htonl(esp_netif_ip4_makeu32(
+                octets[0], octets[1], octets[2], octets[3]));
+        return apply ? config_set_u32(item->key, ip) : ESP_OK;
+    }
+
+    int64_t signed_value;
+    uint64_t unsigned_value;
+    switch (item->type) {
+        case CONFIG_ITEM_TYPE_BOOL:
+            if (!json_int64(entry, &signed_value) ||
+                (signed_value != 0 && signed_value != 1)) return ESP_ERR_INVALID_ARG;
+            return apply ? config_set_bool1(item->key, signed_value == 1) : ESP_OK;
+        case CONFIG_ITEM_TYPE_INT8:
+            if (!json_int64(entry, &signed_value) || signed_value < INT8_MIN || signed_value > INT8_MAX)
+                return ESP_ERR_INVALID_ARG;
+            return apply ? config_set_i8(item->key, (int8_t) signed_value) : ESP_OK;
+        case CONFIG_ITEM_TYPE_INT16:
+            if (!json_int64(entry, &signed_value) || signed_value < INT16_MIN || signed_value > INT16_MAX)
+                return ESP_ERR_INVALID_ARG;
+            return apply ? config_set_i16(item->key, (int16_t) signed_value) : ESP_OK;
+        case CONFIG_ITEM_TYPE_INT32:
+            if (!json_int64(entry, &signed_value) || signed_value < INT32_MIN || signed_value > INT32_MAX)
+                return ESP_ERR_INVALID_ARG;
+            return apply ? config_set_i32(item->key, (int32_t) signed_value) : ESP_OK;
+        case CONFIG_ITEM_TYPE_INT64:
+            if (!json_int64(entry, &signed_value)) return ESP_ERR_INVALID_ARG;
+            return apply ? config_set_i64(item->key, signed_value) : ESP_OK;
+        case CONFIG_ITEM_TYPE_UINT8:
+            if (!json_uint64(entry, &unsigned_value) || unsigned_value > UINT8_MAX)
+                return ESP_ERR_INVALID_ARG;
+            return apply ? config_set_u8(item->key, (uint8_t) unsigned_value) : ESP_OK;
+        case CONFIG_ITEM_TYPE_UINT16:
+            if (!json_uint64(entry, &unsigned_value) || unsigned_value > UINT16_MAX)
+                return ESP_ERR_INVALID_ARG;
+            return apply ? config_set_u16(item->key, (uint16_t) unsigned_value) : ESP_OK;
+        case CONFIG_ITEM_TYPE_UINT32:
+            if (!json_uint64(entry, &unsigned_value) || unsigned_value > UINT32_MAX)
+                return ESP_ERR_INVALID_ARG;
+            return apply ? config_set_u32(item->key, (uint32_t) unsigned_value) : ESP_OK;
+        case CONFIG_ITEM_TYPE_UINT64:
+            if (!json_uint64(entry, &unsigned_value)) return ESP_ERR_INVALID_ARG;
+            return apply ? config_set_u64(item->key, unsigned_value) : ESP_OK;
+        default:
+            return ESP_ERR_INVALID_ARG;
+    }
+}
+
 static esp_err_t config_post_handler(httpd_req_t *req) {
     if (check_auth(req) == ESP_FAIL) return ESP_FAIL;
 
@@ -632,134 +734,41 @@ static esp_err_t config_post_handler(httpd_req_t *req) {
 
     int config_item_count;
     const config_item_t *config_items = config_items_get(&config_item_count);
-    esp_err_t first_error = ESP_OK;
     const char *invalid_key = NULL;
     for (int i = 0; i < config_item_count; i++) {
-        config_item_t item = config_items[i];
+        const config_item_t *item = &config_items[i];
+        cJSON *entry = cJSON_GetObjectItem(root, item->key);
+        if (entry && config_process_entry(item, entry, false) != ESP_OK) {
+            invalid_key = item->key;
+            break;
+        }
+    }
 
-        if (cJSON_HasObjectItem(root, item.key)) {
-            cJSON *entry = cJSON_GetObjectItem(root, item.key);
+    if (invalid_key) {
+        char message[96];
+        snprintf(message, sizeof(message), "Invalid value for %s", invalid_key);
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, message);
+        return ESP_ERR_INVALID_ARG;
+    }
 
-            size_t length = 0;
-            if (cJSON_IsString(entry)) {
-                length = strlen(entry->valuestring);
+    for (int i = 0; i < config_item_count; i++) {
+        const config_item_t *item = &config_items[i];
+        cJSON *entry = cJSON_GetObjectItem(root, item->key);
+        if (!entry) continue;
 
-                // Ignore empty primitives
-                if (length == 0 && item.type != CONFIG_ITEM_TYPE_BLOB && item.type != CONFIG_ITEM_TYPE_STRING) continue;
-
-                // Ignore unchanged values
-                if (strcmp(entry->valuestring, CONFIG_VALUE_UNCHANGED) == 0) continue;
-            }
-
-            esp_err_t err;
-            if (item.type >= CONFIG_ITEM_TYPE_MAX) {
-                err = ESP_ERR_INVALID_ARG;
-            } else if (item.type == CONFIG_ITEM_TYPE_STRING) {
-                err = cJSON_IsString(entry) ? config_set_str(item.key, entry->valuestring)
-                                            : ESP_ERR_INVALID_ARG;
-            } else if (item.type == CONFIG_ITEM_TYPE_BLOB) {
-                err = cJSON_IsString(entry) ? config_set_blob(item.key, entry->valuestring, length)
-                                            : ESP_ERR_INVALID_ARG;
-            } else if (item.type == CONFIG_ITEM_TYPE_COLOR) {
-                if (!cJSON_IsString(entry) || strlen(entry->valuestring) != 7 ||
-                    entry->valuestring[0] != '#') {
-                    err = ESP_ERR_INVALID_ARG;
-                } else {
-                    char *end;
-                    unsigned long rgb = strtoul(entry->valuestring + 1, &end, 16);
-                    if (*end != '\0' || rgb > 0xffffffUL) {
-                        err = ESP_ERR_INVALID_ARG;
-                    } else {
-                        config_color_t color = {.rgba = (uint32_t) rgb << 8u};
-                        if (rgb != 0) color.values.alpha = item.def.color.values.alpha;
-                        err = config_set_color(item.key, color);
-                    }
-                }
-            } else if (item.type == CONFIG_ITEM_TYPE_IP) {
-                uint8_t a[4];
-
-                if (!cJSON_IsArray(entry) || cJSON_GetArraySize(entry) != 4) {
-                    err = ESP_ERR_INVALID_ARG;
-                } else {
-                    err = ESP_OK;
-                    for (int b = 0; b < 4; b++) {
-                        uint64_t octet;
-                        if (!json_uint64(cJSON_GetArrayItem(entry, b), &octet) || octet > 255) {
-                            err = ESP_ERR_INVALID_ARG;
-                            break;
-                        }
-                        a[b] = (uint8_t) octet;
-                    }
-                    if (err == ESP_OK) {
-                        uint32_t ip = esp_netif_htonl(esp_netif_ip4_makeu32(a[0], a[1], a[2], a[3]));
-                        err = config_set_u32(item.key, ip);
-                    }
-                }
-            } else {
-                int64_t signed_value;
-                uint64_t unsigned_value;
-                switch (item.type) {
-                    case CONFIG_ITEM_TYPE_BOOL:
-                        err = json_int64(entry, &signed_value) &&
-                              (signed_value == 0 || signed_value == 1)
-                              ? config_set_bool1(item.key, signed_value == 1) : ESP_ERR_INVALID_ARG;
-                        break;
-                    case CONFIG_ITEM_TYPE_INT8:
-                        err = json_int64(entry, &signed_value) && signed_value >= INT8_MIN && signed_value <= INT8_MAX
-                              ? config_set_i8(item.key, (int8_t) signed_value) : ESP_ERR_INVALID_ARG;
-                        break;
-                    case CONFIG_ITEM_TYPE_INT16:
-                        err = json_int64(entry, &signed_value) && signed_value >= INT16_MIN && signed_value <= INT16_MAX
-                              ? config_set_i16(item.key, (int16_t) signed_value) : ESP_ERR_INVALID_ARG;
-                        break;
-                    case CONFIG_ITEM_TYPE_INT32:
-                        err = json_int64(entry, &signed_value) && signed_value >= INT32_MIN && signed_value <= INT32_MAX
-                              ? config_set_i32(item.key, (int32_t) signed_value) : ESP_ERR_INVALID_ARG;
-                        break;
-                    case CONFIG_ITEM_TYPE_INT64:
-                        err = json_int64(entry, &signed_value)
-                              ? config_set_i64(item.key, signed_value) : ESP_ERR_INVALID_ARG;
-                        break;
-                    case CONFIG_ITEM_TYPE_UINT8:
-                        err = json_uint64(entry, &unsigned_value) && unsigned_value <= UINT8_MAX
-                              ? config_set_u8(item.key, (uint8_t) unsigned_value) : ESP_ERR_INVALID_ARG;
-                        break;
-                    case CONFIG_ITEM_TYPE_UINT16:
-                        err = json_uint64(entry, &unsigned_value) && unsigned_value <= UINT16_MAX
-                              ? config_set_u16(item.key, (uint16_t) unsigned_value) : ESP_ERR_INVALID_ARG;
-                        break;
-                    case CONFIG_ITEM_TYPE_UINT32:
-                        err = json_uint64(entry, &unsigned_value) && unsigned_value <= UINT32_MAX
-                              ? config_set_u32(item.key, (uint32_t) unsigned_value) : ESP_ERR_INVALID_ARG;
-                        break;
-                    case CONFIG_ITEM_TYPE_UINT64:
-                        err = json_uint64(entry, &unsigned_value)
-                              ? config_set_u64(item.key, unsigned_value) : ESP_ERR_INVALID_ARG;
-                        break;
-                    default:
-                        err = ESP_ERR_INVALID_ARG;
-                        break;
-                }
-            }
-
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "Invalid configuration value for %s: %s", item.key, esp_err_to_name(err));
-                if (first_error == ESP_OK) {
-                    first_error = err;
-                    invalid_key = item.key;
-                }
-            }
+        esp_err_t err = config_process_entry(item, entry, true);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to stage configuration value for %s: %s",
+                     item->key, esp_err_to_name(err));
+            cJSON_Delete(root);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                "Failed to save configuration");
+            return err;
         }
     }
 
     cJSON_Delete(root);
-
-    if (first_error != ESP_OK) {
-        char message[96];
-        snprintf(message, sizeof(message), "Invalid value for %s", invalid_key);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, message);
-        return first_error;
-    }
 
     esp_err_t commit_error = config_commit();
     if (commit_error != ESP_OK) {

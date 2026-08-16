@@ -70,6 +70,13 @@ build_target() {
     echo -e "${BLUE}Building firmware...${NC}"
     if idf.py build; then
         echo -e "${GREEN}✓ Build successful for $target_upper${NC}"
+
+        BOOTLOADER_OFFSET=$(awk '$2 == "bootloader/bootloader.bin" { print $1; exit }' build/flash_args)
+        FLASH_FREQ=$(awk '{ for (i = 1; i <= NF; i++) if ($i == "--flash_freq") { print $(i + 1); exit } }' build/flash_args)
+        if [ -z "$BOOTLOADER_OFFSET" ] || [ -z "$FLASH_FREQ" ]; then
+            echo -e "${RED}  Failed to determine flash arguments from build/flash_args${NC}"
+            return 1
+        fi
         
         # Create target directory
         mkdir -p "$BUILD_DIR/$target"
@@ -141,8 +148,8 @@ python -m esptool \\
     write_flash \\
     --flash_mode dio \\
     --flash_size detect \\
-    --flash_freq 40m \\
-    0x1000 bootloader.bin \\
+    --flash_freq $FLASH_FREQ \\
+    $BOOTLOADER_OFFSET bootloader.bin \\
     0x8000 partition-table.bin \\
     0x10000 $MAIN_BIN_NAME \\
     0x210000 www.bin
@@ -174,8 +181,8 @@ python -m esptool ^
     write_flash ^
     --flash_mode dio ^
     --flash_size detect ^
-    --flash_freq 40m ^
-    0x1000 bootloader.bin ^
+    --flash_freq FLASH_FREQ ^
+    BOOTLOADER_OFFSET bootloader.bin ^
     0x8000 partition-table.bin ^
     0x10000 MAIN_BIN_NAME ^
     0x210000 www.bin
@@ -188,6 +195,8 @@ EOF
         # Replace TARGET_CHIP and MAIN_BIN_NAME with actual values
         sed -i "s/TARGET_CHIP/$target/g" "$BUILD_DIR/$target/flash.bat"
         sed -i "s/MAIN_BIN_NAME/$MAIN_BIN_NAME/g" "$BUILD_DIR/$target/flash.bat"
+        sed -i "s/BOOTLOADER_OFFSET/$BOOTLOADER_OFFSET/g" "$BUILD_DIR/$target/flash.bat"
+        sed -i "s/FLASH_FREQ/$FLASH_FREQ/g" "$BUILD_DIR/$target/flash.bat"
         sed -i "s/\$MAIN_BIN_NAME/$MAIN_BIN_NAME/g" "$BUILD_DIR/$target/flash.sh"
         
         # Generate README
@@ -198,6 +207,7 @@ EOF
 - \`bootloader.bin\` - ESP32 bootloader
 - \`partition-table.bin\` - Partition table  
 - Main application firmware (.bin)
+- \`$target-merged.bin\` - complete all-in-one firmware for offset \`0x0\`
 - \`www.bin\` - Web interface files
 - ELF file for debugging (.elf)
 - \`flash.sh\` - Linux/Mac flash script
@@ -225,6 +235,7 @@ EOF
 ### GPIO Pin Assignment
 - **Status LEDs:** Red=GPIO8, Green=GPIO9, Blue=GPIO10
 - **Additional LEDs:** RSSI=GPIO2, Sleep=GPIO3, Assoc=GPIO4
+- **SD card defaults:** MISO=GPIO7, MOSI=GPIO15, CLK=GPIO14, CS=GPIO13
 - **UART:** TX=GPIO21, RX=GPIO20, RTS=GPIO5, CTS=GPIO6
 - **Button:** GPIO0
 
@@ -286,7 +297,7 @@ flash.bat COM3 460800
 ### Manual (esptool.py)
 ```bash
 pip install esptool
-python -m esptool --chip TARGET --port PORT -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size detect --flash_freq 40m 0x1000 bootloader.bin 0x8000 partition-table.bin 0x10000 <firmware>.bin 0x210000 www.bin
+python -m esptool --chip TARGET --port PORT -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size detect --flash_freq FLASH_FREQ BOOTLOADER_OFFSET bootloader.bin 0x8000 partition-table.bin 0x10000 MAIN_BIN_NAME 0x210000 www.bin
 ```
 
 ## First Time Setup
@@ -309,6 +320,9 @@ EOF
         
         # Replace TARGET placeholder with actual target
         sed -i "s/TARGET/$target/g" "$BUILD_DIR/$target/README.md"
+        sed -i "s/FLASH_FREQ/$FLASH_FREQ/g" "$BUILD_DIR/$target/README.md"
+        sed -i "s/BOOTLOADER_OFFSET/$BOOTLOADER_OFFSET/g" "$BUILD_DIR/$target/README.md"
+        sed -i "s/MAIN_BIN_NAME/$MAIN_BIN_NAME/g" "$BUILD_DIR/$target/README.md"
         
         # Get build size info
         if [ -n "$MAIN_BIN" ] && [ -f "$MAIN_BIN" ]; then

@@ -6,11 +6,12 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-// SD card pinout (adjust for your hardware)
-#define PIN_NUM_MISO    2
-#define PIN_NUM_MOSI    15
-#define PIN_NUM_CLK     14
-#define PIN_NUM_CS      13
+// SD card pinout is configurable in menuconfig. ESP32-C3 defaults MISO to
+// GPIO7 because GPIO2 is reserved for its RSSI status LED.
+#define PIN_NUM_MISO    CONFIG_SD_LOGGER_MISO_GPIO
+#define PIN_NUM_MOSI    CONFIG_SD_LOGGER_MOSI_GPIO
+#define PIN_NUM_CLK     CONFIG_SD_LOGGER_CLK_GPIO
+#define PIN_NUM_CS      CONFIG_SD_LOGGER_CS_GPIO
 
 #define MOUNT_POINT "/sdcard"
 

@@ -459,7 +459,19 @@ esp_err_t socket_server_init(void) {
     
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create socket server task");
-        socket_server_deinit();
+        server_running = false;
+        uart_unregister_read_handler(socket_server_uart_handler);
+        if (tcp_server_socket >= 0) {
+            close(tcp_server_socket);
+            tcp_server_socket = -1;
+        }
+        if (udp_server_socket >= 0) {
+            close(udp_server_socket);
+            udp_server_socket = -1;
+        }
+        vSemaphoreDelete(clients_mutex);
+        clients_mutex = NULL;
+        server_task_handle = NULL;
         return ESP_ERR_NO_MEM;
     }
 
