@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ESP32 NTRIP DUO - Multi-target Build Script
-# Builds firmware for ESP32, ESP32-S3, and ESP32-C6
+# Builds firmware for ESP32, ESP32-C3, ESP32-S3, and ESP32-C6
 
 set -e
 
@@ -121,8 +121,8 @@ build_target() {
         
         MERGED_BIN="build/$target-merged.bin"
         if idf.py merge-bin --format raw --output "$target-merged.bin"; then
-            cp "$MERGED_BIN" "$BUILD_DIR/$target/"
-            echo -e "${GREEN}  Copied merged bin: $(basename "$MERGED_BIN")${NC}"
+            cp "$MERGED_BIN" "$BUILD_DIR/$target/$target-ntrip-duo-merged.bin"
+            echo -e "${GREEN}  Copied merged bin: $target-ntrip-duo-merged.bin${NC}"
         else
             echo -e "${RED}  Failed to create merged binary${NC}"
             return 1
@@ -207,7 +207,7 @@ EOF
 - \`bootloader.bin\` - ESP32 bootloader
 - \`partition-table.bin\` - Partition table  
 - Main application firmware (.bin)
-- \`$target-merged.bin\` - complete all-in-one firmware for offset \`0x0\`
+- \`$target-ntrip-duo-merged.bin\` - complete all-in-one firmware for offset \`0x0\`
 - \`www.bin\` - Web interface files
 - ELF file for debugging (.elf)
 - \`flash.sh\` - Linux/Mac flash script
@@ -224,8 +224,12 @@ EOF
 ### GPIO Pin Assignment
 - **Status LEDs:** Red=GPIO21, Green=GPIO22, Blue=GPIO23
 - **Additional LEDs:** RSSI=GPIO18, Sleep=GPIO27, Assoc=GPIO25  
-- **UART:** TX=GPIO1, RX=GPIO3, RTS=GPIO32, CTS=GPIO33
+- **UART2:** TX=GPIO17, RX=GPIO16, RTS=GPIO32, CTS=GPIO33
+- **SD card defaults:** MISO=GPIO2, MOSI=GPIO15, CLK=GPIO14, CS=GPIO13
 - **Button:** GPIO0
+
+GPIO1/GPIO3 share the board USB-UART bridge. ESP32-WROVER boards must remap
+GPIO16/GPIO17 because those pins are normally used by PSRAM.
 
 EOF
                 ;;
@@ -236,7 +240,7 @@ EOF
 - **Status LEDs:** Red=GPIO8, Green=GPIO9, Blue=GPIO10
 - **Additional LEDs:** RSSI=GPIO2, Sleep=GPIO3, Assoc=GPIO4
 - **SD card defaults:** MISO=GPIO7, MOSI=GPIO15, CLK=GPIO14, CS=GPIO13
-- **UART:** TX=GPIO21, RX=GPIO20, RTS=GPIO5, CTS=GPIO6
+- **UART0:** TX=GPIO21, RX=GPIO20, RTS=GPIO5, CTS=GPIO6
 - **Button:** GPIO0
 
 ### ESP32-C3 Features
@@ -253,7 +257,8 @@ EOF
 ### GPIO Pin Assignment  
 - **Status LEDs:** Red=GPIO4, Green=GPIO5, Blue=GPIO6
 - **Additional LEDs:** RSSI=GPIO18, Sleep=GPIO21, Assoc=GPIO47
-- **UART:** TX=GPIO43, RX=GPIO44, RTS=GPIO16, CTS=GPIO17
+- **SD card defaults:** MISO=GPIO2, MOSI=GPIO15, CLK=GPIO14, CS=GPIO13
+- **UART0:** TX=GPIO43, RX=GPIO44, RTS=GPIO16, CTS=GPIO17
 - **Button:** GPIO0
 
 ### ESP32-S3 Features
@@ -269,7 +274,8 @@ EOF
 ### GPIO Pin Assignment
 - **Status LEDs:** Red=GPIO4, Green=GPIO5, Blue=GPIO6  
 - **Additional LEDs:** RSSI=GPIO18, Sleep=GPIO19, Assoc=GPIO20
-- **UART:** TX=GPIO16, RX=GPIO17, RTS=GPIO22, CTS=GPIO23
+- **SD card defaults:** MISO=GPIO2, MOSI=GPIO15, CLK=GPIO14, CS=GPIO13
+- **UART0:** TX=GPIO16, RX=GPIO17, RTS=GPIO22, CTS=GPIO23
 - **Button:** GPIO9
 
 ### ESP32-C6 Features
@@ -284,17 +290,24 @@ EOF
         cat >> "$BUILD_DIR/$target/README.md" << 'EOF'
 ## Flash Instructions
 
-### Linux/Mac
+### Merged firmware (recommended)
+```bash
+python -m esptool --chip TARGET --port PORT -b 460800 --before default_reset --after hard_reset write_flash 0x0 TARGET-ntrip-duo-merged.bin
+```
+
+The remaining methods flash individual files and must use every listed offset.
+
+### Linux/Mac (individual files)
 ```bash
 ./flash.sh /dev/ttyUSB0 460800
 ```
 
-### Windows  
+### Windows (individual files)
 ```cmd
 flash.bat COM3 460800
 ```
 
-### Manual (esptool.py)
+### Manual (individual files)
 ```bash
 pip install esptool
 python -m esptool --chip TARGET --port PORT -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size detect --flash_freq FLASH_FREQ BOOTLOADER_OFFSET bootloader.bin 0x8000 partition-table.bin 0x10000 MAIN_BIN_NAME 0x210000 www.bin
@@ -306,6 +319,9 @@ python -m esptool --chip TARGET --port PORT -b 460800 --before default_reset --a
 3. Open browser and navigate to http://192.168.4.1  
 4. Configure WiFi, NTRIP servers, and other settings
 5. Connect GNSS receiver to configured UART pins
+
+UART settings already stored in NVS survive an update. Change them in the web
+interface or erase NVS to apply new defaults.
 
 ## Features
 - Dual NTRIP server support

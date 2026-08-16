@@ -39,27 +39,32 @@
 
 // Определения GPIO пинов UART по умолчанию для различных типов чипов ESP32
 #ifdef CONFIG_IDF_TARGET_ESP32
-#define DEFAULT_UART_TX_PIN GPIO_NUM_1      // Стандартный ESP32: TX - GPIO1
-#define DEFAULT_UART_RX_PIN GPIO_NUM_3      // Стандартный ESP32: RX - GPIO3
+#define DEFAULT_UART_NUM UART_NUM_2         // UART0 занят встроенным USB-UART мостом
+#define DEFAULT_UART_TX_PIN GPIO_NUM_17     // ESP32-WROOM: TX2
+#define DEFAULT_UART_RX_PIN GPIO_NUM_16     // ESP32-WROOM: RX2
 #define DEFAULT_UART_RTS_PIN GPIO_NUM_32    // Не конфликтует с SPI SD (CLK=GPIO14)
 #define DEFAULT_UART_CTS_PIN GPIO_NUM_33    // Стандартный ESP32: CTS - GPIO33
 #elif defined(CONFIG_IDF_TARGET_ESP32C3)
+#define DEFAULT_UART_NUM UART_NUM_0
 #define DEFAULT_UART_TX_PIN GPIO_NUM_21     // ESP32-C3: TX - GPIO21
 #define DEFAULT_UART_RX_PIN GPIO_NUM_20     // ESP32-C3: RX - GPIO20
 #define DEFAULT_UART_RTS_PIN GPIO_NUM_5     // ESP32-C3: RTS - GPIO5
 #define DEFAULT_UART_CTS_PIN GPIO_NUM_6     // ESP32-C3: CTS - GPIO6
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
+#define DEFAULT_UART_NUM UART_NUM_0
 #define DEFAULT_UART_TX_PIN GPIO_NUM_43     // ESP32-S3: TX - GPIO43
 #define DEFAULT_UART_RX_PIN GPIO_NUM_44     // ESP32-S3: RX - GPIO44
 #define DEFAULT_UART_RTS_PIN GPIO_NUM_16    // ESP32-S3: RTS - GPIO16
 #define DEFAULT_UART_CTS_PIN GPIO_NUM_17    // Не конфликтует с SPI SD (MOSI=GPIO15)
 #elif defined(CONFIG_IDF_TARGET_ESP32C6)
+#define DEFAULT_UART_NUM UART_NUM_0
 #define DEFAULT_UART_TX_PIN GPIO_NUM_16     // ESP32-C6: TX - GPIO16
 #define DEFAULT_UART_RX_PIN GPIO_NUM_17     // ESP32-C6: RX - GPIO17
 #define DEFAULT_UART_RTS_PIN GPIO_NUM_22    // Не конфликтует со status LED GPIO4
 #define DEFAULT_UART_CTS_PIN GPIO_NUM_23    // Не конфликтует со status LED GPIO5
 #else
 // Значения по умолчанию для неподдерживаемых чипов
+#define DEFAULT_UART_NUM UART_NUM_0
 #define DEFAULT_UART_TX_PIN GPIO_NUM_1
 #define DEFAULT_UART_RX_PIN GPIO_NUM_3
 #define DEFAULT_UART_RTS_PIN GPIO_NUM_14
@@ -191,7 +196,7 @@ const config_item_t CONFIG_ITEMS[] = {
         {
                 .key = KEY_CONFIG_UART_NUM,
                 .type = CONFIG_ITEM_TYPE_UINT8,
-                .def.uint8 = UART_NUM_0
+                .def.uint8 = DEFAULT_UART_NUM
         }, {
                 .key = KEY_CONFIG_UART_TX_PIN,
                 .type = CONFIG_ITEM_TYPE_UINT8,

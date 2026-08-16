@@ -166,11 +166,16 @@ jobs:
         - Sleep LED: GPIO 27
         - Assoc LED: GPIO 25
         
-        **UART (Default):**
-        - TX: GPIO 1
-        - RX: GPIO 3
+        **UART2 (Default):**
+        - TX: GPIO 17
+        - RX: GPIO 16
         - RTS: GPIO 32
         - CTS: GPIO 33
+
+        **SD card defaults:** MISO=GPIO2, MOSI=GPIO15, CLK=GPIO14, CS=GPIO13
+
+        GPIO1/GPIO3 share the USB-UART bridge. ESP32-WROVER boards must remap
+        GPIO16/GPIO17 because those pins are normally used by PSRAM.
         
         **Button:** GPIO 0
         EOF
@@ -183,11 +188,13 @@ jobs:
         - Sleep LED: GPIO 3
         - Assoc LED: GPIO 4
         
-        **UART (Default):**
+        **UART0 (Default):**
         - TX: GPIO 21
         - RX: GPIO 20
         - RTS: GPIO 5
         - CTS: GPIO 6
+
+        **SD card defaults:** MISO=GPIO7, MOSI=GPIO15, CLK=GPIO14, CS=GPIO13
         
         **Button:** GPIO 0
         EOF
@@ -200,11 +207,13 @@ jobs:
         - Sleep LED: GPIO 21
         - Assoc LED: GPIO 47
         
-        **UART (Default):**
+        **UART0 (Default):**
         - TX: GPIO 43
         - RX: GPIO 44
         - RTS: GPIO 16
         - CTS: GPIO 17
+
+        **SD card defaults:** MISO=GPIO2, MOSI=GPIO15, CLK=GPIO14, CS=GPIO13
         
         **Button:** GPIO 0
         EOF
@@ -217,11 +226,13 @@ jobs:
         - Sleep LED: GPIO 19
         - Assoc LED: GPIO 20
         
-        **UART (Default):**
+        **UART0 (Default):**
         - TX: GPIO 16
         - RX: GPIO 17
         - RTS: GPIO 22
         - CTS: GPIO 23
+
+        **SD card defaults:** MISO=GPIO2, MOSI=GPIO15, CLK=GPIO14, CS=GPIO13
         
         **Button:** GPIO 9
         EOF
@@ -243,6 +254,9 @@ jobs:
         2. Connect to the open ntrip-DUO_danusha WiFi network
         3. Open browser and navigate to http://192.168.4.1
         4. Configure your WiFi and NTRIP settings
+
+        UART settings stored in NVS survive an update. Change them in the web
+        interface or erase NVS to apply new defaults.
         EOF
         
     - name: Create archive
@@ -287,38 +301,31 @@ jobs:
         cat > release_files/README.md << 'EOF'
         # ESP32 NTRIP DUO - Firmware Release
         
-        This release contains pre-compiled firmware for multiple ESP32 variants:
+        Pre-compiled firmware for ESP32, ESP32-C3, ESP32-S3, and ESP32-C6.
         
         ## Available Targets
-        - **ESP32** - Original ESP32 chip with merged firmware (esp32-ntrip-duo-esp32-*.tar.gz)
-        - **ESP32-C3** - ESP32-C3 with RISC-V core and merged firmware (esp32-ntrip-duo-esp32c3-*.tar.gz)
-        - **ESP32-S3** - ESP32-S3 with enhanced features and merged firmware (esp32-ntrip-duo-esp32s3-*.tar.gz)
-        - **ESP32-C6** - ESP32-C6 with WiFi 6 support and merged firmware (esp32-ntrip-duo-esp32c6-*.tar.gz)
+        - `esp32-ntrip-duo-esp32-*.tar.gz`
+        - `esp32-ntrip-duo-esp32c3-*.tar.gz`
+        - `esp32-ntrip-duo-esp32s3-*.tar.gz`
+        - `esp32-ntrip-duo-esp32c6-*.tar.gz`
         
         ## What's New
-        - ✅ **Merged Firmware**: Single-file firmware for easy flashing
-        - ✅ **TCP/UDP Socket Server/Client**: Network socket functionality
-        - ✅ **Serial Commands**: Remote GNSS configuration via web interface
-        - ✅ **SD Card Logging**: Automatic RTCM data logging with daily file rotation
-        - ✅ **Multi-target builds**: ESP32, ESP32-C3, ESP32-S3, and ESP32-C6 on ESP-IDF 5.4.4
-        - ✅ **Enhanced web interface**: Improved Socket and Serial Commands modules
+        - ESP32-WROOM defaults moved from the shared USB-UART pins to UART2: TX=GPIO17, RX=GPIO16.
+        - ESP32-C3 SD MISO moved to GPIO7 to avoid the RSSI LED on GPIO2.
+        - Missing and invalid web configuration requests are handled safely.
+        - Socket startup failure cleanup and persistent socket-client LED behaviour are fixed.
+        - Target-specific bootloader offsets and flash frequencies are used in individual-file commands.
+        - Pinout, security defaults, and ESP-IDF 5.4.4 build instructions are synchronized.
         
         ## Quick Start
         1. Download the appropriate .tar.gz file for your ESP32 variant
         2. Extract the archive
-        3. Follow the README.md inside for flashing instructions
+        3. Flash `<target>-ntrip-duo-merged.bin` at offset `0x0`
         4. Connect to the open `ntrip-DUO_danusha` WiFi network (no password)
         5. Configure via web interface at http://192.168.4.1
         
-        ## Hardware Requirements
-        - ESP32, ESP32-C3, ESP32-S3, or ESP32-C6 development board
-        - GNSS receiver with UART interface
-        - Optional: SD card for data logging
-        - Optional: Status LEDs on configured GPIO pins
-        
         ## Support
         - Issues: https://github.com/danusha2345/esp32-ntrip-DUO_danusha/issues
-        - Wiki: Check repository wiki for detailed setup guides
         EOF
         
         # Показываем что у нас получилось
@@ -341,15 +348,13 @@ jobs:
         body: |
           ## ESP32 NTRIP DUO Firmware Release ${{ steps.version.outputs.version }}
           
-          ### 🐛 Bug Fixes
-          - **Fixed compilation error**: Added missing `string.h` include in `sd_logger.c`
-          - **Fixed build scripts**: Corrected firmware filename references (removed hardcoded `esp32-xbee.bin`)
-          - **Fixed GitHub Actions**: Build workflows now dynamically detect correct firmware filenames
-          
-          ### 🔧 Improvements  
-          - **Improved build reliability**: All targets (ESP32, ESP32-C3, ESP32-S3, ESP32-C6) now build successfully
-          - **Better error handling**: Build scripts now properly handle target-specific firmware names
-          - **Enhanced CI/CD**: GitHub Actions workflows are more robust and reliable
+          ### Fixes and improvements
+          - ESP32-WROOM now defaults to UART2: TX=GPIO17 and RX=GPIO16, avoiding the USB-UART bridge on GPIO1/GPIO3.
+          - ESP32-C3 SD MISO now defaults to GPIO7, avoiding the RSSI LED on GPIO2.
+          - Web authentication and configuration validation error paths are fixed.
+          - Socket startup cleanup and persistent socket-client LED behaviour are fixed.
+          - Individual-file flash commands use the correct target-specific bootloader offset and flash frequency.
+          - README and archive pin maps now match the firmware defaults.
           
           ### 📦 Downloads
           Choose the appropriate firmware for your hardware:
@@ -359,13 +364,7 @@ jobs:
           - **esp32-ntrip-duo-esp32s3-*.tar.gz** - For ESP32-S3 boards
           - **esp32-ntrip-duo-esp32c6-*.tar.gz** - For ESP32-C6 boards
           
-          Each archive contains:
-          - Pre-compiled firmware binaries
-          - Flashing instructions and configuration
-          - Hardware pin mapping documentation
-          - Setup and configuration guides
-          
-          ### 🚀 Quick Flash (using merged firmware - recommended)
+          ### Quick flash (merged firmware recommended)
           ```bash
           # Extract archive and navigate to folder
           tar -xzf esp32-ntrip-duo-esp32-*.tar.gz
@@ -375,21 +374,13 @@ jobs:
           python -m esptool --chip esp32 -p COM_PORT -b 460800 --before default_reset --after hard_reset write_flash 0x0 esp32-ntrip-duo-merged.bin
           ```
           
-          ### 🛠 Alternative Flash (individual files)
-          ```bash
-          # Flash individual files if needed
-          python -m esptool --chip esp32 -p COM_PORT -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size 4MB --flash_freq 40m 0x1000 bootloader.bin 0x8000 partition-table.bin 0x10000 esp32-ntrip-duo.bin 0x210000 www.bin
-          ```
-          
-          ### 🔗 First Time Setup
+          ### First-time setup
           1. Flash appropriate firmware for your ESP32 variant
           2. Connect to the open **ntrip-DUO_danusha** WiFi network (no password)
           3. Navigate to http://192.168.4.1 in your browser
           4. Configure WiFi, NTRIP servers, and other settings
           
-          ---
-          
-          **Full Changelog**: https://github.com/danusha2345/esp32-ntrip-DUO_danusha/compare/v1.0.0...${{ steps.version.outputs.version }}
+          Existing devices retain UART settings stored in NVS. Select the new pins in the web interface or erase NVS to apply defaults.
         files: release_files/*
         draft: false
         prerelease: false
